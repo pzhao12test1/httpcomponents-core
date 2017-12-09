@@ -24,28 +24,16 @@
  * <http://www.apache.org/>.
  *
  */
-package org.apache.hc.core5.http.nio;
 
-import java.io.IOException;
-
-import org.apache.hc.core5.http.EntityDetails;
-import org.apache.hc.core5.http.HttpException;
-import org.apache.hc.core5.http.HttpResponse;
+package org.apache.hc.core5.function;
 
 /**
- * Abstract asynchronous client side message exchange handler that acts as a request producer
- * and a response consumer.
+ * Abstract object factory.
  *
  * @since 5.0
  */
-public interface AsyncClientExchangeHandler extends AsyncDataExchangeHandler {
+public interface Factory<T> {
 
-    void produceRequest(RequestChannel channel) throws HttpException, IOException;
-
-    void consumeResponse(HttpResponse response, EntityDetails entityDetails) throws HttpException, IOException;
-
-    void consumeInformation(HttpResponse response) throws HttpException, IOException;
-
-    void cancel();
+    T create();
 
 }
