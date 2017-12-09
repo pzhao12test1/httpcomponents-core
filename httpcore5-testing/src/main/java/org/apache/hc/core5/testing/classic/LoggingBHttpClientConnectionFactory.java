@@ -24,45 +24,24 @@
  * <http://www.apache.org/>.
  *
  */
-package org.apache.hc.core5.http;
 
-import org.apache.hc.core5.annotation.Contract;
-import org.apache.hc.core5.annotation.ThreadingBehavior;
+package org.apache.hc.core5.testing.classic;
 
-/**
- * @since 4.4
- */
-@Contract(threading = ThreadingBehavior.STATELESS)
-public interface ExceptionListener {
+import java.io.IOException;
+import java.net.Socket;
 
-    ExceptionListener NO_OP = new ExceptionListener() {
+import org.apache.hc.core5.http.config.H1Config;
+import org.apache.hc.core5.http.io.HttpConnectionFactory;
 
-        @Override
-        public void onError(final Exception ex) {
-        }
+public class LoggingBHttpClientConnectionFactory implements HttpConnectionFactory<LoggingBHttpClientConnection> {
 
-        @Override
-        public void onError(final HttpConnection connection, final Exception ex) {
-        }
+    public static final LoggingBHttpClientConnectionFactory INSTANCE = new LoggingBHttpClientConnectionFactory();
 
-    };
-
-    ExceptionListener STD_ERR = new ExceptionListener() {
-
-        @Override
-        public void onError(final Exception ex) {
-            ex.printStackTrace();
-        }
-
-        @Override
-        public void onError(final HttpConnection connection, final Exception ex) {
-            ex.printStackTrace();
-        }
-
-    };
-
-    void onError(Exception ex);
-
-    void onError(HttpConnection connection, Exception ex);
+    @Override
+    public LoggingBHttpClientConnection createConnection(final Socket socket) throws IOException {
+        final LoggingBHttpClientConnection conn = new LoggingBHttpClientConnection(H1Config.DEFAULT);
+        conn.bind(socket);
+        return conn;
+    }
 
 }
