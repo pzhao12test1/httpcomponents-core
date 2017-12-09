@@ -50,4 +50,6 @@ interface Http2StreamHandler extends ResourceHolder {
 
     void failed(Exception cause);
 
+    void cancel();
+
 }

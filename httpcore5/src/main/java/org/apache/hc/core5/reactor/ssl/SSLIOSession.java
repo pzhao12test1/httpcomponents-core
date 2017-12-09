@@ -34,7 +34,6 @@ import java.nio.channels.ByteChannel;
 import java.nio.channels.CancelledKeyException;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.SelectionKey;
-import java.util.concurrent.atomic.AtomicLong;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
@@ -45,7 +44,6 @@ import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLSession;
 
 import org.apache.hc.core5.annotation.Contract;
-import org.apache.hc.core5.annotation.Internal;
 import org.apache.hc.core5.annotation.ThreadingBehavior;
 import org.apache.hc.core5.function.Callback;
 import org.apache.hc.core5.io.ShutdownType;
@@ -66,7 +64,6 @@ import org.apache.hc.core5.util.Asserts;
  * @since 4.2
  */
 @Contract(threading = ThreadingBehavior.SAFE_CONDITIONAL)
-@Internal
 public class SSLIOSession implements IOSession {
 
     private static final ByteBuffer EMPTY_BUFFER = ByteBuffer.allocate(0);
@@ -77,11 +74,11 @@ public class SSLIOSession implements IOSession {
     private final SSLBuffer inEncrypted;
     private final SSLBuffer outEncrypted;
     private final SSLBuffer inPlain;
+    private final SSLBuffer outPlain;
     private final ByteChannel channel;
     private final SSLSessionInitializer initializer;
     private final SSLSessionVerifier verifier;
     private final Callback<SSLIOSession> callback;
-    private final AtomicLong bytesReadCount;
 
     private int appEventMask;
 
@@ -162,6 +159,7 @@ public class SSLIOSession implements IOSession {
         // Allocate buffers for application (unencrypted) data
         final int appBufferSize = sslSession.getApplicationBufferSize();
         this.inPlain = SSLBufferManagement.create(sslBufferManagement, appBufferSize);
+        this.outPlain = SSLBufferManagement.create(sslBufferManagement, appBufferSize);
         this.channel = new ByteChannel() {
 
             @Override
@@ -185,7 +183,6 @@ public class SSLIOSession implements IOSession {
             }
 
         };
-        this.bytesReadCount = new AtomicLong(0);
     }
 
     @Override
@@ -231,6 +228,8 @@ public class SSLIOSession implements IOSession {
         this.inEncrypted.release();
         this.outEncrypted.release();
         this.inPlain.release();
+        this.outPlain.release();
+
         doHandshake();
     }
 
@@ -288,10 +287,18 @@ public class SSLIOSession implements IOSession {
                 // Generate outgoing handshake data
 
                 // Acquire buffers
+                final ByteBuffer outPlainBuf = this.outPlain.acquire();
                 final ByteBuffer outEncryptedBuf = this.outEncrypted.acquire();
 
-                // Just wrap an empty buffer because there is no data to write.
-                result = doWrap(EMPTY_BUFFER, outEncryptedBuf);
+                // Perform operations
+                outPlainBuf.flip();
+                result = doWrap(outPlainBuf, outEncryptedBuf);
+                outPlainBuf.compact();
+
+                // Release outPlain if empty
+                if (outPlainBuf.position() == 0) {
+                    this.outPlain.release();
+                }
 
                 if (result.getStatus() != Status.OK) {
                     handshaking = false;
@@ -563,12 +570,30 @@ public class SSLIOSession implements IOSession {
         if (this.status != ACTIVE) {
             throw new ClosedChannelException();
         }
-        final ByteBuffer outEncryptedBuf = this.outEncrypted.acquire();
-        final SSLEngineResult result = doWrap(src, outEncryptedBuf);
-        if (result.getStatus() == Status.CLOSED) {
-            this.status = CLOSED;
+        if (this.outPlain.hasData()) {
+            // Acquire buffers
+            final ByteBuffer outPlainBuf = this.outPlain.acquire();
+            final ByteBuffer outEncryptedBuf = this.outEncrypted.acquire();
+
+            // Perform operations
+            outPlainBuf.flip();
+            doWrap(outPlainBuf, outEncryptedBuf);
+            outPlainBuf.compact();
+
+            // Release outPlain if empty
+            if (outPlainBuf.position() == 0) {
+                this.outPlain.release();
+            }
         }
-        return result.bytesConsumed();
+        if (!this.outPlain.hasData()) {
+            final ByteBuffer outEncryptedBuf = this.outEncrypted.acquire();
+            final SSLEngineResult result = doWrap(src, outEncryptedBuf);
+            if (result.getStatus() == Status.CLOSED) {
+                this.status = CLOSED;
+            }
+            return result.bytesConsumed();
+        }
+        return 0;
     }
 
     private synchronized int readPlain(final ByteBuffer dst) {
@@ -589,7 +614,6 @@ public class SSLIOSession implements IOSession {
             if (inPlainBuf.position() == 0) {
                 this.inPlain.release();
             }
-            bytesReadCount.addAndGet(n);
             return n;
         }
         if (this.endOfStream) {
@@ -598,12 +622,18 @@ public class SSLIOSession implements IOSession {
         return 0;
     }
 
-    public void resetReadCount() {
-        bytesReadCount.set(0L);
+    /**
+     * @since 5.0
+     */
+    public synchronized boolean hasInputDate() {
+        return this.inPlain.hasData();
     }
 
-    public long getReadCount() {
-        return bytesReadCount.get();
+    /**
+     * @since 5.0
+     */
+    public synchronized boolean hasOutputDate() {
+        return this.outPlain.hasData();
     }
 
     @Override
@@ -630,6 +660,7 @@ public class SSLIOSession implements IOSession {
         this.inEncrypted.release();
         this.outEncrypted.release();
         this.inPlain.release();
+        this.outPlain.release();
 
         this.status = CLOSED;
         this.session.shutdown(shutdownType);
@@ -711,26 +742,6 @@ public class SSLIOSession implements IOSession {
     }
 
     @Override
-    public void updateReadTime() {
-        this.session.updateReadTime();
-    }
-
-    @Override
-    public void updateWriteTime() {
-        this.session.updateWriteTime();
-    }
-
-    @Override
-    public long getLastReadTime() {
-        return this.session.getLastReadTime();
-    }
-
-    @Override
-    public long getLastWriteTime() {
-        return this.session.getLastWriteTime();
-    }
-
-    @Override
     public IOEventHandler getHandler() {
         return this.session.getHandler();
     }
@@ -784,6 +795,8 @@ public class SSLIOSession implements IOSession {
         buffer.append(!this.inPlain.hasData() ? 0 : inPlain.acquire().position());
         buffer.append("][");
         buffer.append(!this.outEncrypted.hasData() ? 0 : outEncrypted.acquire().position());
+        buffer.append("][");
+        buffer.append(!this.outPlain.hasData() ? 0 : outPlain.acquire().position());
         buffer.append("]");
         return buffer.toString();
     }

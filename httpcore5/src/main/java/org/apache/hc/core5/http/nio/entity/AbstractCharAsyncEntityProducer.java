@@ -143,14 +143,4 @@ public abstract class AbstractCharAsyncEntityProducer implements AsyncEntityProd
         }
     }
 
-    protected void releaseResourcesInternal() {
-    }
-
-    @Override
-    public final void releaseResources() {
-        charsetEncoder.reset();
-        state = State.ACTIVE;
-        releaseResourcesInternal();
-    }
-
 }

@@ -52,8 +52,6 @@ import org.apache.hc.core5.util.TimeValue;
 
 class SingleCoreIOReactor extends AbstractSingleCoreIOReactor implements ConnectionInitiator {
 
-    private static final int MAX_CHANNEL_REQUESTS = 10000;
-
     private final IOEventHandlerFactory eventHandlerFactory;
     private final IOReactorConfig reactorConfig;
     private final Decorator<IOSession> ioSessionDecorator;
@@ -180,7 +178,7 @@ class SingleCoreIOReactor extends AbstractSingleCoreIOReactor implements Connect
 
     private void processPendingChannels() throws IOException {
         SocketChannel socketChannel;
-        for (int i = 0; i < MAX_CHANNEL_REQUESTS && (socketChannel = this.channelQueue.poll()) != null; i++) {
+        while ((socketChannel = this.channelQueue.poll()) != null) {
             try {
                 prepareSocket(socketChannel.socket());
                 socketChannel.configureBlocking(false);
@@ -281,7 +279,7 @@ class SingleCoreIOReactor extends AbstractSingleCoreIOReactor implements Connect
 
     private void processPendingConnectionRequests() {
         IOSessionRequest sessionRequest;
-        for (int i = 0; i < MAX_CHANNEL_REQUESTS && (sessionRequest = this.requestQueue.poll()) != null; i++) {
+        while ((sessionRequest = this.requestQueue.poll()) != null) {
             if (!sessionRequest.isCancelled()) {
                 final SocketChannel socketChannel;
                 try {
@@ -295,7 +293,7 @@ class SingleCoreIOReactor extends AbstractSingleCoreIOReactor implements Connect
                 } catch (final IOException ex) {
                     try {
                         socketChannel.close();
-                    } catch (final IOException ignore) {
+                    } catch (IOException ignore) {
                     }
                     sessionRequest.failed(ex);
                 }

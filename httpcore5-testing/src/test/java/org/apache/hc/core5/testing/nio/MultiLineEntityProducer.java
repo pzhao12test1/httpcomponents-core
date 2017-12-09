@@ -50,11 +50,6 @@ public class MultiLineEntityProducer extends AbstractCharAsyncEntityProducer {
     }
 
     @Override
-    public boolean isRepeatable() {
-        return true;
-    }
-
-    @Override
     public long getContentLength() {
         return -1;
     }
@@ -85,9 +80,7 @@ public class MultiLineEntityProducer extends AbstractCharAsyncEntityProducer {
     }
 
     @Override
-    public void releaseResourcesInternal() {
-        count = 0;
-        charbuf.clear();
+    public void releaseResources() {
     }
 
 }

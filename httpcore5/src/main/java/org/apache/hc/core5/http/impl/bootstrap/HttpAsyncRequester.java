@@ -30,7 +30,6 @@ package org.apache.hc.core5.http.impl.bootstrap;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -47,7 +46,6 @@ import org.apache.hc.core5.http.HttpRequest;
 import org.apache.hc.core5.http.HttpResponse;
 import org.apache.hc.core5.http.ProtocolException;
 import org.apache.hc.core5.http.URIScheme;
-import org.apache.hc.core5.http.impl.DefaultAddressResolver;
 import org.apache.hc.core5.http.nio.AsyncClientEndpoint;
 import org.apache.hc.core5.http.nio.AsyncClientExchangeHandler;
 import org.apache.hc.core5.http.nio.AsyncRequestProducer;
@@ -63,10 +61,8 @@ import org.apache.hc.core5.http.protocol.HttpContext;
 import org.apache.hc.core5.http.protocol.HttpCoreContext;
 import org.apache.hc.core5.io.ShutdownType;
 import org.apache.hc.core5.net.URIAuthority;
-import org.apache.hc.core5.pool.ConnPoolControl;
-import org.apache.hc.core5.pool.ManagedConnPool;
+import org.apache.hc.core5.pool.ControlledConnPool;
 import org.apache.hc.core5.pool.PoolEntry;
-import org.apache.hc.core5.pool.PoolStats;
 import org.apache.hc.core5.reactor.IOEventHandlerFactory;
 import org.apache.hc.core5.reactor.IOReactorConfig;
 import org.apache.hc.core5.reactor.IOSession;
@@ -74,14 +70,13 @@ import org.apache.hc.core5.reactor.IOSessionListener;
 import org.apache.hc.core5.reactor.ssl.TransportSecurityLayer;
 import org.apache.hc.core5.util.Args;
 import org.apache.hc.core5.util.TimeValue;
-import org.apache.hc.core5.util.Timeout;
 
 /**
  * @since 5.0
  */
-public class HttpAsyncRequester extends AsyncRequester implements ConnPoolControl<HttpHost> {
+public class HttpAsyncRequester extends AsyncRequester {
 
-    private final ManagedConnPool<HttpHost, IOSession> connPool;
+    private final ControlledConnPool<HttpHost, IOSession> connPool;
     private final TlsStrategy tlsStrategy;
 
     public HttpAsyncRequester(
@@ -89,7 +84,7 @@ public class HttpAsyncRequester extends AsyncRequester implements ConnPoolContro
             final IOEventHandlerFactory eventHandlerFactory,
             final Decorator<IOSession> ioSessionDecorator,
             final IOSessionListener sessionListener,
-            final ManagedConnPool<HttpHost, IOSession> connPool,
+            final ControlledConnPool<HttpHost, IOSession> connPool,
             final TlsStrategy tlsStrategy) {
         super(eventHandlerFactory, ioReactorConfig, ioSessionDecorator, sessionListener, new Callback<IOSession>() {
 
@@ -98,69 +93,14 @@ public class HttpAsyncRequester extends AsyncRequester implements ConnPoolContro
                 session.addFirst(new ShutdownCommand(ShutdownType.GRACEFUL));
             }
 
-        }, DefaultAddressResolver.INSTANCE);
+        });
         this.connPool = Args.notNull(connPool, "Connection pool");
         this.tlsStrategy = tlsStrategy;
     }
 
-    @Override
-    public PoolStats getTotalStats() {
-        return connPool.getTotalStats();
-    }
-
-    @Override
-    public PoolStats getStats(final HttpHost route) {
-        return connPool.getStats(route);
-    }
-
-    @Override
-    public void setMaxTotal(final int max) {
-        connPool.setMaxTotal(max);
-    }
-
-    @Override
-    public int getMaxTotal() {
-        return connPool.getMaxTotal();
-    }
-
-    @Override
-    public void setDefaultMaxPerRoute(final int max) {
-        connPool.setDefaultMaxPerRoute(max);
-    }
-
-    @Override
-    public int getDefaultMaxPerRoute() {
-        return connPool.getDefaultMaxPerRoute();
-    }
-
-    @Override
-    public void setMaxPerRoute(final HttpHost route, final int max) {
-        connPool.setMaxPerRoute(route, max);
-    }
-
-    @Override
-    public int getMaxPerRoute(final HttpHost route) {
-        return connPool.getMaxPerRoute(route);
-    }
-
-    @Override
-    public void closeIdle(final TimeValue idleTime) {
-        connPool.closeIdle(idleTime);
-    }
-
-    @Override
-    public void closeExpired() {
-        connPool.closeExpired();
-    }
-
-    @Override
-    public Set<HttpHost> getRoutes() {
-        return connPool.getRoutes();
-    }
-
     public Future<AsyncClientEndpoint> connect(
             final HttpHost host,
-            final Timeout timeout,
+            final TimeValue timeout,
             final Object attachment,
             final FutureCallback<AsyncClientEndpoint> callback) {
         return doConnect(host, timeout, attachment, callback);
@@ -168,14 +108,14 @@ public class HttpAsyncRequester extends AsyncRequester implements ConnPoolContro
 
     protected Future<AsyncClientEndpoint> doConnect(
             final HttpHost host,
-            final Timeout timeout,
+            final TimeValue timeout,
             final Object attachment,
             final FutureCallback<AsyncClientEndpoint> callback) {
         Args.notNull(host, "Host");
         Args.notNull(timeout, "Timeout");
         final ComplexFuture<AsyncClientEndpoint> resultFuture = new ComplexFuture<>(callback);
         final Future<PoolEntry<HttpHost, IOSession>> leaseFuture = connPool.lease(
-                host, null, timeout, new FutureCallback<PoolEntry<HttpHost, IOSession>>() {
+                host, null, new FutureCallback<PoolEntry<HttpHost, IOSession>>() {
 
             @Override
             public void completed(final PoolEntry<HttpHost, IOSession> poolEntry) {
@@ -244,13 +184,13 @@ public class HttpAsyncRequester extends AsyncRequester implements ConnPoolContro
         return resultFuture;
     }
 
-    public Future<AsyncClientEndpoint> connect(final HttpHost host, final Timeout timeout) throws InterruptedException {
+    public Future<AsyncClientEndpoint> connect(final HttpHost host, final TimeValue timeout) throws InterruptedException {
         return connect(host, timeout, null, null);
     }
 
     public void execute(
             final AsyncClientExchangeHandler exchangeHandler,
-            final Timeout timeout,
+            final TimeValue timeout,
             final HttpContext context) {
         Args.notNull(exchangeHandler, "Exchange handler");
         Args.notNull(timeout, "Timeout");
@@ -357,7 +297,7 @@ public class HttpAsyncRequester extends AsyncRequester implements ConnPoolContro
 
             });
 
-        } catch (final IOException | HttpException ex) {
+        } catch (IOException | HttpException ex) {
             exchangeHandler.failed(ex);
         }
     }
@@ -365,7 +305,7 @@ public class HttpAsyncRequester extends AsyncRequester implements ConnPoolContro
     public final <T> Future<T> execute(
             final AsyncRequestProducer requestProducer,
             final AsyncResponseConsumer<T> responseConsumer,
-            final Timeout timeout,
+            final TimeValue timeout,
             final HttpContext context,
             final FutureCallback<T> callback) {
         Args.notNull(requestProducer, "Request producer");
@@ -397,7 +337,7 @@ public class HttpAsyncRequester extends AsyncRequester implements ConnPoolContro
     public final <T> Future<T> execute(
             final AsyncRequestProducer requestProducer,
             final AsyncResponseConsumer<T> responseConsumer,
-            final Timeout timeout,
+            final TimeValue timeout,
             final FutureCallback<T> callback) {
         return execute(requestProducer, responseConsumer, timeout, null, callback);
     }
@@ -437,7 +377,7 @@ public class HttpAsyncRequester extends AsyncRequester implements ConnPoolContro
             final PoolEntry<HttpHost, IOSession> poolEntry = poolEntryRef.getAndSet(null);
             if (poolEntry != null) {
                 poolEntry.discardConnection(ShutdownType.IMMEDIATE);
-                connPool.release(poolEntry, false);
+                connPool.release(poolEntry, false);    ;
             }
         }
 

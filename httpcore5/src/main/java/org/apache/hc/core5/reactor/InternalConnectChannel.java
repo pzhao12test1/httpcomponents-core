@@ -39,7 +39,6 @@ final class InternalConnectChannel extends InternalChannel {
     private final SelectionKey key;
     private final SocketChannel socketChannel;
     private final IOSessionRequest sessionRequest;
-    private final long creationTime;
     private final InternalDataChannelFactory dataChannelFactory;
 
     InternalConnectChannel(
@@ -51,7 +50,6 @@ final class InternalConnectChannel extends InternalChannel {
         this.key = key;
         this.socketChannel = socketChannel;
         this.sessionRequest = sessionRequest;
-        this.creationTime = System.currentTimeMillis();
         this.dataChannelFactory = dataChannelFactory;
     }
 
@@ -61,18 +59,14 @@ final class InternalConnectChannel extends InternalChannel {
             if (socketChannel.isConnectionPending()) {
                 socketChannel.finishConnect();
             }
-            //check out connectTimeout
-            final long now = System.currentTimeMillis();
-            if (checkTimeout(now)) {
-                final InternalDataChannel dataChannel = dataChannelFactory.create(
-                        key,
-                        socketChannel,
-                        sessionRequest.remoteEndpoint,
-                        sessionRequest.attachment);
-                key.attach(dataChannel);
-                sessionRequest.completed(dataChannel);
-                dataChannel.handleIOEvent(SelectionKey.OP_CONNECT);
-            }
+            final InternalDataChannel dataChannel = dataChannelFactory.create(
+                    key,
+                    socketChannel,
+                    sessionRequest.remoteEndpoint,
+                    sessionRequest.attachment);
+            key.attach(dataChannel);
+            sessionRequest.completed(dataChannel);
+            dataChannel.handleIOEvent(SelectionKey.OP_CONNECT);
         }
     }
 
@@ -82,14 +76,8 @@ final class InternalConnectChannel extends InternalChannel {
     }
 
     @Override
-    long getLastReadTime() {
-        return creationTime;
-    }
-
-    @Override
     void onTimeout() throws IOException {
         sessionRequest.failed(new SocketTimeoutException());
-        close();
     }
 
     @Override
@@ -110,4 +98,5 @@ final class InternalConnectChannel extends InternalChannel {
         } catch (final IOException ignore) {
         }
     }
+
 }

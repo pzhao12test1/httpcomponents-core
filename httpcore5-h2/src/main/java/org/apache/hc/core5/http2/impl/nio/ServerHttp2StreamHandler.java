@@ -40,16 +40,14 @@ import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.HttpVersion;
 import org.apache.hc.core5.http.ProtocolException;
 import org.apache.hc.core5.http.impl.BasicHttpConnectionMetrics;
-import org.apache.hc.core5.http.impl.IncomingEntityDetails;
+import org.apache.hc.core5.http.impl.LazyEntityDetails;
 import org.apache.hc.core5.http.impl.nio.MessageState;
-import org.apache.hc.core5.http.impl.nio.ServerSupport;
 import org.apache.hc.core5.http.nio.AsyncPushProducer;
-import org.apache.hc.core5.http.nio.AsyncResponseProducer;
 import org.apache.hc.core5.http.nio.AsyncServerExchangeHandler;
 import org.apache.hc.core5.http.nio.DataStreamChannel;
 import org.apache.hc.core5.http.nio.HandlerFactory;
+import org.apache.hc.core5.http.nio.HttpContextAware;
 import org.apache.hc.core5.http.nio.ResponseChannel;
-import org.apache.hc.core5.http.nio.support.ImmediateResponseExchangeHandler;
 import org.apache.hc.core5.http.protocol.HttpCoreContext;
 import org.apache.hc.core5.http.protocol.HttpProcessor;
 import org.apache.hc.core5.http2.H2ConnectionException;
@@ -68,7 +66,6 @@ public class ServerHttp2StreamHandler implements Http2StreamHandler {
     private final HandlerFactory<AsyncServerExchangeHandler> exchangeHandlerFactory;
     private final HttpCoreContext context;
     private final AtomicBoolean responseCommitted;
-    private final AtomicBoolean failed;
     private final AtomicBoolean done;
 
     private volatile AsyncServerExchangeHandler exchangeHandler;
@@ -113,7 +110,6 @@ public class ServerHttp2StreamHandler implements Http2StreamHandler {
         this.exchangeHandlerFactory = exchangeHandlerFactory;
         this.context = context;
         this.responseCommitted = new AtomicBoolean(false);
-        this.failed = new AtomicBoolean(false);
         this.done = new AtomicBoolean(false);
         this.requestState = MessageState.HEADERS;
         this.responseState = MessageState.IDLE;
@@ -187,11 +183,11 @@ public class ServerHttp2StreamHandler implements Http2StreamHandler {
                 requestState = endStream ? MessageState.COMPLETE : MessageState.BODY;
 
                 final HttpRequest request = DefaultH2RequestConverter.INSTANCE.convert(headers);
-                final EntityDetails requestEntityDetails = endStream ? null : new IncomingEntityDetails(request, -1);
+                final EntityDetails requestEntityDetails = endStream ? null : new LazyEntityDetails(request);
 
                 final AsyncServerExchangeHandler handler;
                 try {
-                    handler = exchangeHandlerFactory != null ? exchangeHandlerFactory.create(request, context) : null;
+                    handler = exchangeHandlerFactory != null ? exchangeHandlerFactory.create(request) : null;
                 } catch (final ProtocolException ex) {
                     throw new H2StreamResetException(H2Error.PROTOCOL_ERROR, ex.getMessage());
                 }
@@ -203,7 +199,15 @@ public class ServerHttp2StreamHandler implements Http2StreamHandler {
                 context.setProtocolVersion(HttpVersion.HTTP_2);
                 context.setAttribute(HttpCoreContext.HTTP_REQUEST, request);
 
-                final ResponseChannel responseChannel = new ResponseChannel() {
+                if (exchangeHandler instanceof HttpContextAware) {
+                    ((HttpContextAware) exchangeHandler).setContext(context);
+                }
+
+                httpProcessor.process(request, requestEntityDetails, context);
+                connMetrics.incrementRequestCount();
+                receivedRequest = request;
+
+                exchangeHandler.handleRequest(request, requestEntityDetails, new ResponseChannel() {
 
                     @Override
                     public void sendInformation(final HttpResponse response) throws HttpException, IOException {
@@ -213,7 +217,6 @@ public class ServerHttp2StreamHandler implements Http2StreamHandler {
                     @Override
                     public void sendResponse(
                             final HttpResponse response, final EntityDetails responseEntityDetails) throws HttpException, IOException {
-                        ServerSupport.validateResponse(response, responseEntityDetails);
                         commitResponse(response, responseEntityDetails);
                     }
 
@@ -223,23 +226,7 @@ public class ServerHttp2StreamHandler implements Http2StreamHandler {
                         commitPromise(promise, pushProducer);
                     }
 
-                };
-
-                try {
-                    httpProcessor.process(request, requestEntityDetails, context);
-                    connMetrics.incrementRequestCount();
-                    receivedRequest = request;
-
-                    exchangeHandler.handleRequest(request, requestEntityDetails, responseChannel, context);
-                } catch (final HttpException ex) {
-                    if (!responseCommitted.get()) {
-                        final AsyncResponseProducer responseProducer = ServerSupport.handleException(ex);
-                        exchangeHandler = new ImmediateResponseExchangeHandler(responseProducer);
-                        exchangeHandler.handleRequest(request, requestEntityDetails, responseChannel, context);
-                    } else {
-                        throw ex;
-                    }
-                }
+                });
                 break;
             case BODY:
                 responseState = MessageState.COMPLETE;
@@ -287,14 +274,17 @@ public class ServerHttp2StreamHandler implements Http2StreamHandler {
     @Override
     public void failed(final Exception cause) {
         try {
-            if (failed.compareAndSet(false, true)) {
-                if (exchangeHandler != null) {
-                    exchangeHandler.failed(cause);
-                }
+            if (exchangeHandler != null) {
+                exchangeHandler.failed(cause);
             }
         } finally {
             releaseResources();
         }
+    }
+
+    @Override
+    public void cancel() {
+        releaseResources();
     }
 
     @Override

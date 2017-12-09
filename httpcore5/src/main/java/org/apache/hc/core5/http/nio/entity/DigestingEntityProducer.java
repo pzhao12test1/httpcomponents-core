@@ -64,11 +64,6 @@ public class DigestingEntityProducer implements AsyncEntityProducer {
     }
 
     @Override
-    public boolean isRepeatable() {
-        return wrapped.isRepeatable();
-    }
-
-    @Override
     public long getContentLength() {
         return wrapped.getContentLength();
     }

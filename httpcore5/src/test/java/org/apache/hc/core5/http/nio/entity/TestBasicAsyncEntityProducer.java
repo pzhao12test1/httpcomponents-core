@@ -29,8 +29,8 @@ package org.apache.hc.core5.http.nio.entity;
 
 import java.nio.charset.StandardCharsets;
 
-import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.WritableByteChannelMock;
+import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.nio.AsyncEntityProducer;
 import org.apache.hc.core5.http.nio.BasicDataStreamChannel;
 import org.apache.hc.core5.http.nio.DataStreamChannel;
@@ -75,28 +75,6 @@ public class TestBasicAsyncEntityProducer {
 
         Assert.assertFalse(byteChannel.isOpen());
         Assert.assertEquals("abc", byteChannel.dump(StandardCharsets.US_ASCII));
-    }
-
-    @Test
-    public void testTextContentRepeatable() throws Exception {
-        final AsyncEntityProducer producer = new BasicAsyncEntityProducer(
-                "abc", ContentType.TEXT_PLAIN);
-
-        Assert.assertEquals(3, producer.getContentLength());
-        Assert.assertEquals(ContentType.TEXT_PLAIN.toString(), producer.getContentType());
-        Assert.assertEquals(null, producer.getContentEncoding());
-
-        for (int i = 0; i < 3; i++) {
-            final WritableByteChannelMock byteChannel = new WritableByteChannelMock(1024);
-            final DataStreamChannel streamChannel = new BasicDataStreamChannel(byteChannel);
-
-            producer.produce(streamChannel);
-
-            Assert.assertFalse(byteChannel.isOpen());
-            Assert.assertEquals("abc", byteChannel.dump(StandardCharsets.US_ASCII));
-
-            producer.releaseResources();
-        }
     }
 
 }

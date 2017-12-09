@@ -93,8 +93,7 @@ public class BasicLineParser implements LineParser {
 
         // long enough for "HTTP/1.1"?
         if (pos + protolength + 4 > cursor.getUpperBound()) {
-            throw new ParseException("Invalid protocol version",
-                    buffer, cursor.getLowerBound(), cursor.getUpperBound(), cursor.getPos());
+            throw new ParseException("Invalid protocol version: " + buffer.toString());
         }
 
         // check the protocol name and slash
@@ -106,8 +105,7 @@ public class BasicLineParser implements LineParser {
             ok = buffer.charAt(pos + protolength) == '/';
         }
         if (!ok) {
-            throw new ParseException("Invalid protocol version",
-                    buffer, cursor.getLowerBound(), cursor.getUpperBound(), cursor.getPos());
+            throw new ParseException("Invalid protocol version: " + buffer.toString());
         }
 
         cursor.updatePos(pos + protolength + 1);
@@ -117,12 +115,10 @@ public class BasicLineParser implements LineParser {
         try {
             major = Integer.parseInt(token1);
         } catch (final NumberFormatException e) {
-            throw new ParseException("Invalid protocol major version number",
-                    buffer, cursor.getLowerBound(), cursor.getUpperBound(), cursor.getPos());
+            throw new ParseException("Invalid protocol major version number: " + buffer.toString());
         }
         if (cursor.atEnd()) {
-            throw new ParseException("Invalid protocol version",
-                    buffer, cursor.getLowerBound(), cursor.getUpperBound(), cursor.getPos());
+            throw new ParseException("Invalid protocol version: " + buffer.toString());
         }
         cursor.updatePos(cursor.getPos() + 1);
         final String token2 = this.tokenParser.parseToken(buffer, cursor, BLANKS);
@@ -130,8 +126,7 @@ public class BasicLineParser implements LineParser {
         try {
             minor = Integer.parseInt(token2);
         } catch (final NumberFormatException e) {
-            throw new ParseException("Invalid protocol minor version number",
-                    buffer, cursor.getLowerBound(), cursor.getUpperBound(), cursor.getPos());
+            throw new ParseException("Invalid protocol minor version number: " + buffer.toString());
         }
         return new HttpVersion(major, minor);
     }
@@ -153,20 +148,17 @@ public class BasicLineParser implements LineParser {
         this.tokenParser.skipWhiteSpace(buffer, cursor);
         final String method = this.tokenParser.parseToken(buffer, cursor, BLANKS);
         if (TextUtils.isEmpty(method)) {
-            throw new ParseException("Invalid request line",
-                    buffer, cursor.getLowerBound(), cursor.getUpperBound(), cursor.getPos());
+            throw new ParseException("Invalid request line: " + buffer.toString());
         }
         this.tokenParser.skipWhiteSpace(buffer, cursor);
         final String uri = this.tokenParser.parseToken(buffer, cursor, BLANKS);
         if (TextUtils.isEmpty(uri)) {
-            throw new ParseException("Invalid request line",
-                    buffer, cursor.getLowerBound(), cursor.getUpperBound(), cursor.getPos());
+            throw new ParseException("Invalid request line: " + buffer.toString());
         }
         final ProtocolVersion ver = parseProtocolVersion(buffer, cursor);
         this.tokenParser.skipWhiteSpace(buffer, cursor);
         if (!cursor.atEnd()) {
-            throw new ParseException("Invalid request line",
-                    buffer, cursor.getLowerBound(), cursor.getUpperBound(), cursor.getPos());
+            throw new ParseException("Invalid request line: " + buffer.toString());
         }
         return new RequestLine(method, uri, ver);
     }
@@ -182,16 +174,14 @@ public class BasicLineParser implements LineParser {
         final String s = this.tokenParser.parseToken(buffer, cursor, BLANKS);
         for (int i = 0; i < s.length(); i++) {
             if (!Character.isDigit(s.charAt(i))) {
-                throw new ParseException("Status line contains invalid status code",
-                        buffer, cursor.getLowerBound(), cursor.getUpperBound(), cursor.getPos());
+                throw new ParseException("Status line contains invalid status code: " + buffer.toString());
             }
         }
         final int statusCode;
         try {
             statusCode = Integer.parseInt(s);
         } catch (final NumberFormatException e) {
-            throw new ParseException("Status line contains invalid status code",
-                    buffer, cursor.getLowerBound(), cursor.getUpperBound(), cursor.getPos());
+            throw new ParseException("Status line contains invalid status code: " + buffer.toString());
         }
         final String text = buffer.substringTrimmed(cursor.getPos(), cursor.getUpperBound());
         return new StatusLine(ver, statusCode, text);
@@ -208,8 +198,7 @@ public class BasicLineParser implements LineParser {
                 buffer.charAt(cursor.getPos()) != ':' ||
                 TextUtils.isEmpty(name) ||
                 TokenParser.isWhitespace(buffer.charAt(cursor.getPos() - 1))) {
-            throw new ParseException("Invalid header",
-                    buffer, cursor.getLowerBound(), cursor.getUpperBound(), cursor.getPos());
+            throw new ParseException("Invalid header: " + buffer.toString());
         }
         final String value = buffer.substringTrimmed(cursor.getPos() + 1, cursor.getUpperBound());
         return new BasicHeader(name, value);

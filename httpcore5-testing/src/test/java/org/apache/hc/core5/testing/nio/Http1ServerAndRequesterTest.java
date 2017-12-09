@@ -29,9 +29,6 @@ package org.apache.hc.core5.testing.nio;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.SocketAddress;
-import java.util.Arrays;
-import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
@@ -48,33 +45,23 @@ import org.apache.hc.core5.http.HttpRequest;
 import org.apache.hc.core5.http.HttpResponse;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.Message;
-import org.apache.hc.core5.http.URIScheme;
 import org.apache.hc.core5.http.impl.bootstrap.AsyncRequesterBootstrap;
 import org.apache.hc.core5.http.impl.bootstrap.AsyncServerBootstrap;
 import org.apache.hc.core5.http.impl.bootstrap.HttpAsyncRequester;
 import org.apache.hc.core5.http.impl.bootstrap.HttpAsyncServer;
-import org.apache.hc.core5.http.impl.bootstrap.StandardFilters;
 import org.apache.hc.core5.http.nio.AsyncClientEndpoint;
-import org.apache.hc.core5.http.nio.AsyncDataConsumer;
-import org.apache.hc.core5.http.nio.AsyncEntityProducer;
-import org.apache.hc.core5.http.nio.AsyncFilterChain;
-import org.apache.hc.core5.http.nio.AsyncFilterHandler;
 import org.apache.hc.core5.http.nio.AsyncPushProducer;
 import org.apache.hc.core5.http.nio.AsyncServerExchangeHandler;
 import org.apache.hc.core5.http.nio.BasicRequestProducer;
 import org.apache.hc.core5.http.nio.BasicResponseConsumer;
+import org.apache.hc.core5.http.nio.ResponseChannel;
 import org.apache.hc.core5.http.nio.entity.StringAsyncEntityConsumer;
 import org.apache.hc.core5.http.nio.entity.StringAsyncEntityProducer;
-import org.apache.hc.core5.http.nio.ssl.BasicClientTlsStrategy;
-import org.apache.hc.core5.http.nio.ssl.BasicServerTlsStrategy;
-import org.apache.hc.core5.http.nio.ssl.SecurePortStrategy;
-import org.apache.hc.core5.http.protocol.HttpContext;
 import org.apache.hc.core5.io.ShutdownType;
 import org.apache.hc.core5.reactor.ExceptionEvent;
 import org.apache.hc.core5.reactor.IOReactorConfig;
 import org.apache.hc.core5.reactor.ListenerEndpoint;
-import org.apache.hc.core5.testing.SSLTestContexts;
-import org.apache.hc.core5.testing.classic.LoggingConnPoolListener;
+import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -83,28 +70,12 @@ import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExternalResource;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
-@RunWith(Parameterized.class)
 public class Http1ServerAndRequesterTest {
 
-    private final Logger log = LogManager.getLogger(getClass());
-
-    @Parameterized.Parameters(name = "{0}")
-    public static Collection<Object[]> protocols() {
-        return Arrays.asList(new Object[][]{
-                { URIScheme.HTTP },
-                { URIScheme.HTTPS }
-        });
-    }
     private static final Timeout TIMEOUT = Timeout.ofSeconds(30);
 
-    private final URIScheme scheme;
-
-    public Http1ServerAndRequesterTest(final URIScheme scheme) {
-        this.scheme = scheme;
-    }
+    private final Logger log = LogManager.getLogger(getClass());
 
     private HttpAsyncServer server;
 
@@ -119,6 +90,45 @@ public class Http1ServerAndRequesterTest {
                             IOReactorConfig.custom()
                                     .setSoTimeout(TIMEOUT)
                                     .build())
+                    .register("/no-keep-alive*", new Supplier<AsyncServerExchangeHandler>() {
+
+                        @Override
+                        public AsyncServerExchangeHandler get() {
+                            return new EchoHandler(2048) {
+
+                                @Override
+                                public void handleRequest(
+                                        final HttpRequest request,
+                                        final EntityDetails entityDetails,
+                                        final ResponseChannel responseChannel) throws HttpException, IOException {
+                                    super.handleRequest(request, entityDetails, new ResponseChannel() {
+
+                                        @Override
+                                        public void sendInformation(final HttpResponse response) throws HttpException, IOException {
+                                            responseChannel.sendInformation(response);
+                                        }
+
+                                        @Override
+                                        public void sendResponse(
+                                                final HttpResponse response,
+                                                final EntityDetails entityDetails) throws HttpException, IOException {
+                                            response.setHeader(HttpHeaders.CONNECTION, HeaderElements.CLOSE);
+                                            responseChannel.sendResponse(response, entityDetails);
+                                        }
+
+                                        @Override
+                                        public void pushPromise(
+                                                final HttpRequest promise,
+                                                final AsyncPushProducer pushProducer) throws HttpException, IOException {
+                                            responseChannel.pushPromise(promise, pushProducer);
+                                        }
+
+                                    });
+                                }
+                            };
+                        }
+
+                    })
                     .register("*", new Supplier<AsyncServerExchangeHandler>() {
 
                         @Override
@@ -127,53 +137,6 @@ public class Http1ServerAndRequesterTest {
                         }
 
                     })
-                    .addFilterBefore(StandardFilters.MAIN_HANDLER.name(), "no-keepalive", new AsyncFilterHandler() {
-
-                        @Override
-                        public AsyncDataConsumer handle(
-                                final HttpRequest request,
-                                final EntityDetails entityDetails,
-                                final HttpContext context,
-                                final AsyncFilterChain.ResponseTrigger responseTrigger,
-                                final AsyncFilterChain chain) throws HttpException, IOException {
-                            return chain.proceed(request, entityDetails, context, new AsyncFilterChain.ResponseTrigger() {
-
-                                @Override
-                                public void sendInformation(
-                                        final HttpResponse response) throws HttpException, IOException {
-                                    responseTrigger.sendInformation(response);
-                                }
-
-                                @Override
-                                public void submitResponse(
-                                        final HttpResponse response,
-                                        final AsyncEntityProducer entityProducer) throws HttpException, IOException {
-                                    if (request.getPath().startsWith("/no-keep-alive")) {
-                                        response.setHeader(HttpHeaders.CONNECTION, HeaderElements.CLOSE);
-                                    }
-                                    responseTrigger.submitResponse(response, entityProducer);
-                                }
-
-                                @Override
-                                public void pushPromise(
-                                        final HttpRequest promise,
-                                        final AsyncPushProducer responseProducer) throws HttpException, IOException {
-                                    responseTrigger.pushPromise(promise, responseProducer);
-                                }
-
-                            });
-                        }
-                    })
-                    .setTlsStrategy(scheme == URIScheme.HTTPS ? new BasicServerTlsStrategy(
-                            SSLTestContexts.createServerSSLContext(),
-                            new SecurePortStrategy() {
-
-                                @Override
-                                public boolean isSecure(final SocketAddress localAddress) {
-                                    return true;
-                                }
-
-                            }) : null)
                     .setIOSessionListener(LoggingIOSessionListener.INSTANCE)
                     .setStreamListener(LoggingHttp1StreamListener.INSTANCE_SERVER)
                     .setIOSessionDecorator(LoggingIOSessionDecorator.INSTANCE)
@@ -213,7 +176,6 @@ public class Http1ServerAndRequesterTest {
                     .setIOReactorConfig(IOReactorConfig.custom()
                             .setSoTimeout(TIMEOUT)
                             .build())
-                    .setTlsStrategy(new BasicClientTlsStrategy(SSLTestContexts.createClientSSLContext()))
                     .setIOSessionListener(LoggingIOSessionListener.INSTANCE)
                     .setStreamListener(LoggingHttp1StreamListener.INSTANCE_CLIENT)
                     .setConnPoolListener(LoggingConnPoolListener.INSTANCE)
@@ -250,7 +212,7 @@ public class Http1ServerAndRequesterTest {
         final InetSocketAddress address = (InetSocketAddress) listener.getAddress();
         requester.start();
 
-        final HttpHost target = new HttpHost("localhost", address.getPort(), scheme.id);
+        final HttpHost target = new HttpHost("localhost", address.getPort());
         final Future<Message<HttpResponse, String>> resultFuture1 = requester.execute(
                 new BasicRequestProducer("POST", target, "/stuff",
                         new StringAsyncEntityProducer("some stuff", ContentType.TEXT_PLAIN)),
@@ -293,7 +255,7 @@ public class Http1ServerAndRequesterTest {
         final InetSocketAddress address = (InetSocketAddress) listener.getAddress();
         requester.start();
 
-        final HttpHost target = new HttpHost("localhost", address.getPort(), scheme.id);
+        final HttpHost target = new HttpHost("localhost", address.getPort());
         final Future<Message<HttpResponse, String>> resultFuture1 = requester.execute(
                 new BasicRequestProducer("POST", target, "/no-keep-alive/stuff",
                         new StringAsyncEntityProducer("some stuff", ContentType.TEXT_PLAIN)),
@@ -336,8 +298,8 @@ public class Http1ServerAndRequesterTest {
         final InetSocketAddress address = (InetSocketAddress) listener.getAddress();
         requester.start();
 
-        final HttpHost target = new HttpHost("localhost", address.getPort(), scheme.id);
-        final Future<AsyncClientEndpoint> endpointFuture = requester.connect(target, Timeout.ofSeconds(5));
+        final HttpHost target = new HttpHost("localhost", address.getPort());
+        final Future<AsyncClientEndpoint> endpointFuture = requester.connect(target, TimeValue.ofSeconds(5));
         final AsyncClientEndpoint endpoint = endpointFuture.get(TIMEOUT.getDuration(), TIMEOUT.getTimeUnit());
         try {
 
@@ -387,8 +349,8 @@ public class Http1ServerAndRequesterTest {
         final InetSocketAddress address = (InetSocketAddress) listener.getAddress();
         requester.start();
 
-        final HttpHost target = new HttpHost("localhost", address.getPort(), scheme.id);
-        final Future<AsyncClientEndpoint> endpointFuture = requester.connect(target, Timeout.ofSeconds(5));
+        final HttpHost target = new HttpHost("localhost", address.getPort());
+        final Future<AsyncClientEndpoint> endpointFuture = requester.connect(target, TimeValue.ofSeconds(5));
         final AsyncClientEndpoint endpoint = endpointFuture.get(TIMEOUT.getDuration(), TIMEOUT.getTimeUnit());
         try {
 

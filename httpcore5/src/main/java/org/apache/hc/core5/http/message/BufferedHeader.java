@@ -88,14 +88,14 @@ public class BufferedHeader implements FormattedHeader, Serializable {
         Args.notNull(buffer, "Char array buffer");
         final int colon = buffer.indexOf(':');
         if (colon <= 0) {
-            throw new ParseException("Invalid header", buffer, 0, buffer.length());
+            throw new ParseException("Invalid header: " + buffer.toString());
         }
         if (strict && TokenParser.isWhitespace(buffer.charAt(colon - 1))) {
-            throw new ParseException("Invalid header", buffer, 0, buffer.length(), colon - 1);
+            throw new ParseException("Invalid header: " + buffer.toString());
         }
         final String s = buffer.substringTrimmed(0, colon);
         if (s.length() == 0) {
-            throw new ParseException("Invalid header", buffer, 0, buffer.length(), colon);
+            throw new ParseException("Invalid header: " + buffer.toString());
         }
         this.buffer = buffer;
         this.name = s;

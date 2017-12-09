@@ -28,7 +28,6 @@
 package org.apache.hc.core5.testing.nio;
 
 import java.net.InetSocketAddress;
-import java.net.SocketAddress;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedList;
@@ -42,7 +41,6 @@ import org.apache.hc.core5.http.HttpHost;
 import org.apache.hc.core5.http.HttpResponse;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.Message;
-import org.apache.hc.core5.http.URIScheme;
 import org.apache.hc.core5.http.impl.bootstrap.HttpAsyncRequester;
 import org.apache.hc.core5.http.impl.bootstrap.HttpAsyncServer;
 import org.apache.hc.core5.http.nio.AsyncClientEndpoint;
@@ -51,27 +49,19 @@ import org.apache.hc.core5.http.nio.BasicRequestProducer;
 import org.apache.hc.core5.http.nio.BasicResponseConsumer;
 import org.apache.hc.core5.http.nio.entity.StringAsyncEntityConsumer;
 import org.apache.hc.core5.http.nio.entity.StringAsyncEntityProducer;
-import org.apache.hc.core5.http.nio.ssl.SecurePortStrategy;
 import org.apache.hc.core5.http2.HttpVersionPolicy;
 import org.apache.hc.core5.http2.impl.nio.bootstrap.H2RequesterBootstrap;
 import org.apache.hc.core5.http2.impl.nio.bootstrap.H2ServerBootstrap;
-import org.apache.hc.core5.http2.ssl.H2ClientTlsStrategy;
-import org.apache.hc.core5.http2.ssl.H2ServerTlsStrategy;
 import org.apache.hc.core5.io.ShutdownType;
 import org.apache.hc.core5.reactor.ExceptionEvent;
 import org.apache.hc.core5.reactor.IOReactorConfig;
 import org.apache.hc.core5.reactor.ListenerEndpoint;
-import org.apache.hc.core5.testing.SSLTestContexts;
-import org.apache.hc.core5.testing.TestingSupport;
-import org.apache.hc.core5.testing.classic.LoggingConnPoolListener;
+import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.hamcrest.CoreMatchers;
 import org.junit.Assert;
-import org.junit.Assume;
-import org.junit.Before;
-import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExternalResource;
@@ -86,16 +76,18 @@ public class Http2ServerAndRequesterTest {
     @Parameterized.Parameters(name = "{0}")
     public static Collection<Object[]> protocols() {
         return Arrays.asList(new Object[][]{
-                { URIScheme.HTTP },
-                { URIScheme.HTTPS }
+                { HttpVersionPolicy.NEGOTIATE },
+                { HttpVersionPolicy.FORCE_HTTP_1 },
+                { HttpVersionPolicy.FORCE_HTTP_2 }
         });
     }
+
     private static final Timeout TIMEOUT = Timeout.ofSeconds(30);
 
-    private final URIScheme scheme;
+    private final HttpVersionPolicy versionPolicy;
 
-    public Http2ServerAndRequesterTest(final URIScheme scheme) {
-        this.scheme = scheme;
+    public Http2ServerAndRequesterTest(final HttpVersionPolicy versionPolicy) {
+        this.versionPolicy = versionPolicy;
     }
 
     private HttpAsyncServer server;
@@ -107,24 +99,13 @@ public class Http2ServerAndRequesterTest {
         protected void before() throws Throwable {
             log.debug("Starting up test server");
             server = H2ServerBootstrap.bootstrap()
-                    .setVersionPolicy(HttpVersionPolicy.NEGOTIATE)
+                    .setVersionPolicy(versionPolicy)
                     .setIOReactorConfig(
                             IOReactorConfig.custom()
                                     .setSoTimeout(TIMEOUT)
                                     .build())
-                    .setTlsStrategy(scheme == URIScheme.HTTPS ? new H2ServerTlsStrategy(
-                            SSLTestContexts.createServerSSLContext(),
-                            new SecurePortStrategy() {
-
-                                @Override
-                                public boolean isSecure(final SocketAddress localAddress) {
-                                    return true;
-                                }
-
-                            }) : null)
                     .setIOSessionListener(LoggingIOSessionListener.INSTANCE)
                     .setStreamListener(LoggingHttp1StreamListener.INSTANCE_SERVER)
-                    .setStreamListener(LoggingHttp2StreamListener.INSTANCE)
                     .setIOSessionDecorator(LoggingIOSessionDecorator.INSTANCE)
                     .register("*", new Supplier<AsyncServerExchangeHandler>() {
 
@@ -167,14 +148,12 @@ public class Http2ServerAndRequesterTest {
         protected void before() throws Throwable {
             log.debug("Starting up test client");
             requester = H2RequesterBootstrap.bootstrap()
-                    .setVersionPolicy(HttpVersionPolicy.NEGOTIATE)
+                    .setVersionPolicy(versionPolicy)
                     .setIOReactorConfig(IOReactorConfig.custom()
                             .setSoTimeout(TIMEOUT)
                             .build())
-                    .setTlsStrategy(new H2ClientTlsStrategy(SSLTestContexts.createClientSSLContext()))
                     .setIOSessionListener(LoggingIOSessionListener.INSTANCE)
                     .setStreamListener(LoggingHttp1StreamListener.INSTANCE_CLIENT)
-                    .setStreamListener(LoggingHttp2StreamListener.INSTANCE)
                     .setConnPoolListener(LoggingConnPoolListener.INSTANCE)
                     .setIOSessionDecorator(LoggingIOSessionDecorator.INSTANCE)
                     .create();
@@ -201,20 +180,6 @@ public class Http2ServerAndRequesterTest {
 
     };
 
-    private static int javaVersion;
-
-    @BeforeClass
-    public static void determineJavaVersion() {
-        javaVersion = TestingSupport.determineJRELevel();
-    }
-
-    @Before
-    public void checkVersion() {
-        if (scheme == URIScheme.HTTPS) {
-            Assume.assumeTrue("Java version must be 1.8 or greater",  javaVersion > 7);
-        }
-    }
-
     @Test
     public void testSequentialRequests() throws Exception {
         server.start();
@@ -223,7 +188,7 @@ public class Http2ServerAndRequesterTest {
         final InetSocketAddress address = (InetSocketAddress) listener.getAddress();
         requester.start();
 
-        final HttpHost target = new HttpHost("localhost", address.getPort(), scheme.id);
+        final HttpHost target = new HttpHost("localhost", address.getPort());
         final Future<Message<HttpResponse, String>> resultFuture1 = requester.execute(
                 new BasicRequestProducer("POST", target, "/stuff",
                         new StringAsyncEntityProducer("some stuff", ContentType.TEXT_PLAIN)),
@@ -266,8 +231,8 @@ public class Http2ServerAndRequesterTest {
         final InetSocketAddress address = (InetSocketAddress) listener.getAddress();
         requester.start();
 
-        final HttpHost target = new HttpHost("localhost", address.getPort(), scheme.id);
-        final Future<AsyncClientEndpoint> endpointFuture = requester.connect(target, Timeout.ofSeconds(5));
+        final HttpHost target = new HttpHost("localhost", address.getPort());
+        final Future<AsyncClientEndpoint> endpointFuture = requester.connect(target, TimeValue.ofSeconds(5));
         final AsyncClientEndpoint endpoint = endpointFuture.get(TIMEOUT.getDuration(), TIMEOUT.getTimeUnit());
         try {
 
@@ -317,8 +282,8 @@ public class Http2ServerAndRequesterTest {
         final InetSocketAddress address = (InetSocketAddress) listener.getAddress();
         requester.start();
 
-        final HttpHost target = new HttpHost("localhost", address.getPort(), scheme.id);
-        final Future<AsyncClientEndpoint> endpointFuture = requester.connect(target, Timeout.ofSeconds(5));
+        final HttpHost target = new HttpHost("localhost", address.getPort());
+        final Future<AsyncClientEndpoint> endpointFuture = requester.connect(target, TimeValue.ofSeconds(5));
         final AsyncClientEndpoint endpoint = endpointFuture.get(TIMEOUT.getDuration(), TIMEOUT.getTimeUnit());
         try {
 

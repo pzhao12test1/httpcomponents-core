@@ -231,7 +231,7 @@ class BHttpConnectionBase implements BHttpConnection {
             } finally {
                 try {
                     socket.close();
-                } catch (final IOException ignore) {
+                } catch (IOException ignore) {
                 }
             }
         }

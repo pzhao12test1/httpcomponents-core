@@ -31,7 +31,6 @@ import java.io.IOException;
 import org.apache.hc.core5.http.HttpException;
 import org.apache.hc.core5.http.HttpRequest;
 import org.apache.hc.core5.http.nio.AsyncRequestConsumer;
-import org.apache.hc.core5.http.nio.AsyncServerRequestHandler;
 import org.apache.hc.core5.http.protocol.HttpContext;
 import org.apache.hc.core5.util.Args;
 
@@ -40,26 +39,30 @@ import org.apache.hc.core5.util.Args;
  */
 public class BasicServerExchangeHandler<T> extends AbstractServerExchangeHandler<T> {
 
-    private final AsyncServerRequestHandler<T> requestHandler;
+    private final RequestConsumerSupplier<T> consumerSupplier;
+    private final ResponseHandler<T> responseHandler;
 
-    public BasicServerExchangeHandler(final AsyncServerRequestHandler<T> requestHandler) {
+    public BasicServerExchangeHandler(
+            final RequestConsumerSupplier<T> consumerSupplier,
+            final ResponseHandler<T> responseHandler) {
         super();
-        this.requestHandler = Args.notNull(requestHandler, "Response handler");
+        this.consumerSupplier = Args.notNull(consumerSupplier, "Consumer supplier");
+        this.responseHandler = Args.notNull(responseHandler, "Response handler");
     }
 
     @Override
     protected AsyncRequestConsumer<T> supplyConsumer(
             final HttpRequest request,
             final HttpContext context) throws HttpException {
-        return requestHandler.prepare(request, context);
+        return consumerSupplier.get(request, context);
     }
 
     @Override
     protected void handle(
             final T requestMessage,
-            final AsyncServerRequestHandler.ResponseTrigger responseTrigger,
+            final ResponseTrigger responseTrigger,
             final HttpContext context) throws HttpException, IOException {
-        requestHandler.handle(requestMessage, responseTrigger, context);
+        responseHandler.handle(requestMessage, responseTrigger, context);
     }
 
 }

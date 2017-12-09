@@ -39,16 +39,21 @@ import org.apache.hc.core5.http.HttpRequest;
 import org.apache.hc.core5.http.HttpResponse;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.HttpVersion;
+import org.apache.hc.core5.http.MethodNotSupportedException;
 import org.apache.hc.core5.http.MisdirectedRequestException;
+import org.apache.hc.core5.http.NotImplementedException;
 import org.apache.hc.core5.http.ProtocolException;
 import org.apache.hc.core5.http.ProtocolVersion;
 import org.apache.hc.core5.http.UnsupportedHttpVersionException;
+import org.apache.hc.core5.http.impl.LazyEntityDetails;
 import org.apache.hc.core5.http.nio.AsyncPushProducer;
 import org.apache.hc.core5.http.nio.AsyncResponseProducer;
 import org.apache.hc.core5.http.nio.AsyncServerExchangeHandler;
+import org.apache.hc.core5.http.nio.BasicResponseProducer;
 import org.apache.hc.core5.http.nio.CapacityChannel;
 import org.apache.hc.core5.http.nio.DataStreamChannel;
 import org.apache.hc.core5.http.nio.HandlerFactory;
+import org.apache.hc.core5.http.nio.HttpContextAware;
 import org.apache.hc.core5.http.nio.ResourceHolder;
 import org.apache.hc.core5.http.nio.ResponseChannel;
 import org.apache.hc.core5.http.nio.support.ImmediateResponseExchangeHandler;
@@ -119,6 +124,19 @@ class ServerHttp1StreamHandler implements ResourceHolder {
         this.responseState = MessageState.IDLE;
     }
 
+    private void validateResponse(
+            final HttpResponse response,
+            final EntityDetails responseEntityDetails) throws HttpException {
+        final int status = response.getCode();
+        switch (status) {
+            case HttpStatus.SC_NO_CONTENT:
+            case HttpStatus.SC_NOT_MODIFIED:
+                if (responseEntityDetails != null) {
+                    throw new HttpException("Response " + status + " must not enclose an entity");
+                }
+        }
+    }
+
     private void commitResponse(
             final HttpResponse response,
             final EntityDetails responseEntityDetails) throws HttpException, IOException {
@@ -187,16 +205,40 @@ class ServerHttp1StreamHandler implements ResourceHolder {
         return requestState == MessageState.COMPLETE && responseState == MessageState.COMPLETE;
     }
 
-    void consumeHeader(final HttpRequest request, final EntityDetails requestEntityDetails) throws HttpException, IOException {
+    AsyncResponseProducer handleException(final Exception ex) {
+        String message = ex.getMessage();
+        if (message == null) {
+            message = ex.toString();
+        }
+        return new BasicResponseProducer(toStatusCode(ex), message);
+    }
+
+    protected int toStatusCode(final Exception ex) {
+        final int code;
+        if (ex instanceof MethodNotSupportedException) {
+            code = HttpStatus.SC_NOT_IMPLEMENTED;
+        } else if (ex instanceof UnsupportedHttpVersionException) {
+            code = HttpStatus.SC_HTTP_VERSION_NOT_SUPPORTED;
+        } else if (ex instanceof NotImplementedException) {
+            code = HttpStatus.SC_NOT_IMPLEMENTED;
+        } else if (ex instanceof ProtocolException) {
+            code = HttpStatus.SC_BAD_REQUEST;
+        } else {
+            code = HttpStatus.SC_INTERNAL_SERVER_ERROR;
+        }
+        return code;
+    }
+
+    void consumeHeader(final HttpRequest request, final boolean requestEndStream) throws HttpException, IOException {
         if (done.get() || requestState != MessageState.HEADERS) {
             throw new ProtocolException("Unexpected message head");
         }
         receivedRequest = request;
-        requestState = requestEntityDetails == null ? MessageState.COMPLETE : MessageState.BODY;
+        requestState = requestEndStream ? MessageState.COMPLETE : MessageState.BODY;
 
         AsyncServerExchangeHandler handler;
         try {
-            handler = exchangeHandlerFactory.create(request, context);
+            handler = exchangeHandlerFactory.create(request);
         } catch (final MisdirectedRequestException ex) {
             handler =  new ImmediateResponseExchangeHandler(HttpStatus.SC_MISDIRECTED_REQUEST, ex.getMessage());
         } catch (final HttpException ex) {
@@ -215,6 +257,11 @@ class ServerHttp1StreamHandler implements ResourceHolder {
         context.setProtocolVersion(transportVersion);
         context.setAttribute(HttpCoreContext.HTTP_REQUEST, request);
 
+        if (exchangeHandler instanceof HttpContextAware) {
+            ((HttpContextAware) exchangeHandler).setContext(context);
+        }
+
+        final EntityDetails requestEntityDetails = requestEndStream ? null : new LazyEntityDetails(request);
         final ResponseChannel responseChannel = new ResponseChannel() {
 
             @Override
@@ -225,7 +272,7 @@ class ServerHttp1StreamHandler implements ResourceHolder {
             @Override
             public void sendResponse(
                     final HttpResponse response, final EntityDetails responseEntityDetails) throws HttpException, IOException {
-                ServerSupport.validateResponse(response, responseEntityDetails);
+                validateResponse(response, responseEntityDetails);
                 commitResponse(response, responseEntityDetails);
             }
 
@@ -238,12 +285,12 @@ class ServerHttp1StreamHandler implements ResourceHolder {
         };
         try {
             httpProcessor.process(request, requestEntityDetails, context);
-            exchangeHandler.handleRequest(request, requestEntityDetails, responseChannel, context);
+            exchangeHandler.handleRequest(request, requestEntityDetails, responseChannel);
         } catch (final HttpException ex) {
             if (!responseCommitted.get()) {
-                final AsyncResponseProducer responseProducer = ServerSupport.handleException(ex);
+                final AsyncResponseProducer responseProducer = handleException(ex);
                 exchangeHandler = new ImmediateResponseExchangeHandler(responseProducer);
-                exchangeHandler.handleRequest(request, requestEntityDetails, responseChannel, context);
+                exchangeHandler.handleRequest(request, requestEntityDetails, responseChannel);
             } else {
                 throw ex;
             }

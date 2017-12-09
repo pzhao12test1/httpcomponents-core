@@ -60,15 +60,7 @@ public class BasicHttpRequest extends HeaderGroup implements HttpRequest {
      * @param path request path.
      */
     public BasicHttpRequest(final String method, final String path) {
-        super();
-        this.method = method;
-        if (path != null) {
-            try {
-                setUri(new URI(path));
-            } catch (final URISyntaxException ex) {
-                this.path = path;
-            }
-        }
+        this(method, null, path);
     }
 
     /**
@@ -99,7 +91,24 @@ public class BasicHttpRequest extends HeaderGroup implements HttpRequest {
     public BasicHttpRequest(final String method, final URI requestUri) {
         super();
         this.method = Args.notNull(method, "Method name");
-        setUri(Args.notNull(requestUri, "Request URI"));
+        Args.notNull(requestUri, "Request URI");
+        this.scheme = requestUri.getScheme();
+        this.authority = requestUri.getHost() != null ? new URIAuthority(
+                requestUri.getRawUserInfo(),
+                requestUri.getHost(),
+                requestUri.getPort()) : null;
+        final StringBuilder buf = new StringBuilder();
+        final String path = requestUri.getRawPath();
+        if (!TextUtils.isBlank(path)) {
+            buf.append(path);
+        } else {
+            buf.append("/");
+        }
+        final String query = requestUri.getRawQuery();
+        if (query != null) {
+            buf.append('?').append(query);
+        }
+        this.path = buf.toString();
     }
 
     @Override
@@ -167,26 +176,6 @@ public class BasicHttpRequest extends HeaderGroup implements HttpRequest {
         return getPath();
     }
 
-    void setUri(final URI requestUri) {
-        this.scheme = requestUri.getScheme();
-        this.authority = requestUri.getHost() != null ? new URIAuthority(
-                requestUri.getRawUserInfo(),
-                requestUri.getHost(),
-                requestUri.getPort()) : null;
-        final StringBuilder buf = new StringBuilder();
-        final String path = requestUri.getRawPath();
-        if (!TextUtils.isBlank(path)) {
-            buf.append(path);
-        } else {
-            buf.append("/");
-        }
-        final String query = requestUri.getRawQuery();
-        if (query != null) {
-            buf.append('?').append(query);
-        }
-        this.path = buf.toString();
-    }
-
     @Override
     public URI getUri() throws URISyntaxException {
         if (this.requestUri == null) {
@@ -198,14 +187,7 @@ public class BasicHttpRequest extends HeaderGroup implements HttpRequest {
                     buf.append(":").append(this.authority.getPort());
                 }
             }
-            if (this.path == null) {
-                buf.append("/");
-            } else {
-                if (buf.length() > 0 && !this.path.startsWith("/")) {
-                    buf.append("/");
-                }
-                buf.append(this.path);
-            }
+            buf.append(this.path != null ? this.path : "/");
             this.requestUri = new URI(buf.toString());
         }
         return this.requestUri;

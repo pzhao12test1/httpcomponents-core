@@ -231,7 +231,7 @@ public class TestingFramework {
 
         final ServerBootstrap serverBootstrap = ServerBootstrap.bootstrap()
                                           .setSocketConfig(socketConfig)
-                                          .register("/*", requestHandler);
+                                          .registerHandler("/*", requestHandler);
 
         server = serverBootstrap.create();
         try {
@@ -446,8 +446,8 @@ public class TestingFramework {
             final ByteArrayInputStream bin = new ByteArrayInputStream(bos.toByteArray());
             final ObjectInputStream ois = new ObjectInputStream(bin);
             return ois.readObject();
-        } catch (final ClassNotFoundException | IOException ex) {
-            throw new TestingFrameworkException(ex);
+        } catch (ClassNotFoundException | IOException e) {
+            throw new TestingFrameworkException(e);
         }
     }
 }

@@ -120,7 +120,7 @@ public class TestStrictConnPool {
         }
     }
 
-    @Test(expected = IllegalStateException.class)
+    @Test
     public void testReleaseUnknownEntry() throws Exception {
         final StrictConnPool<String, HttpConnection> pool = new StrictConnPool<>(2, 2);
         pool.release(new PoolEntry<String, HttpConnection>("somehost"), true);

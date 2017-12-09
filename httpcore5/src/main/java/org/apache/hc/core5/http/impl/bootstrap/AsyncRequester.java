@@ -37,9 +37,8 @@ import org.apache.hc.core5.concurrent.DefaultThreadFactory;
 import org.apache.hc.core5.concurrent.FutureCallback;
 import org.apache.hc.core5.function.Callback;
 import org.apache.hc.core5.function.Decorator;
-import org.apache.hc.core5.function.Resolver;
 import org.apache.hc.core5.http.HttpHost;
-import org.apache.hc.core5.http.impl.DefaultAddressResolver;
+import org.apache.hc.core5.http.URIScheme;
 import org.apache.hc.core5.io.ShutdownType;
 import org.apache.hc.core5.net.NamedEndpoint;
 import org.apache.hc.core5.reactor.ConnectionInitiator;
@@ -57,15 +56,13 @@ import org.apache.hc.core5.util.TimeValue;
 public class AsyncRequester implements IOReactorService, ConnectionInitiator {
 
     private final DefaultConnectingIOReactor ioReactor;
-    private final Resolver<HttpHost, InetSocketAddress> addressResolver;
 
     public AsyncRequester(
             final IOEventHandlerFactory eventHandlerFactory,
             final IOReactorConfig ioReactorConfig,
             final Decorator<IOSession> ioSessionDecorator,
             final IOSessionListener sessionListener,
-            final Callback<IOSession> sessionShutdownCallback,
-            final Resolver<HttpHost, InetSocketAddress> addressResolver) {
+            final Callback<IOSession> sessionShutdownCallback) {
         this.ioReactor = new DefaultConnectingIOReactor(
                 eventHandlerFactory,
                 ioReactorConfig,
@@ -73,7 +70,20 @@ public class AsyncRequester implements IOReactorService, ConnectionInitiator {
                 ioSessionDecorator,
                 sessionListener,
                 sessionShutdownCallback);
-        this.addressResolver = addressResolver != null ? addressResolver : DefaultAddressResolver.INSTANCE;
+    }
+
+    private InetSocketAddress toSocketAddress(final HttpHost host) {
+        int port = host.getPort();
+        if (port < 0) {
+            final String scheme = host.getSchemeName();
+            if (URIScheme.HTTP.same(scheme)) {
+                port = 80;
+            } else if (URIScheme.HTTPS.same(scheme)) {
+                port = 443;
+            }
+        }
+        final String hostName = host.getHostName();
+        return new InetSocketAddress(hostName, port);
     }
 
     @Override
@@ -94,7 +104,7 @@ public class AsyncRequester implements IOReactorService, ConnectionInitiator {
             final FutureCallback<IOSession> callback) {
         Args.notNull(host, "Host");
         Args.notNull(timeout, "Timeout");
-        return connect(host, addressResolver.resolve(host), null, timeout, attachment, callback);
+        return connect(host, toSocketAddress(host), null, timeout, attachment, callback);
     }
 
     @Override

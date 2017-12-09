@@ -28,10 +28,7 @@
 package org.apache.hc.core5.http.protocol;
 
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Set;
 
 import org.apache.hc.core5.annotation.Contract;
 import org.apache.hc.core5.annotation.ThreadingBehavior;
@@ -48,7 +45,6 @@ import org.apache.hc.core5.util.Args;
  * <br>
  * This class can be used to resolve an object matching a particular request URI.
  *
- * @param <T> The type of registered objects.
  * @since 4.0
  */
 @Contract(threading = ThreadingBehavior.SAFE)
@@ -59,18 +55,6 @@ public class UriPatternMatcher<T> implements LookupRegistry<T> {
     public UriPatternMatcher() {
         super();
         this.map = new HashMap<>();
-    }
-
-    /**
-     * Returns a {@link Set} view of the mappings contained in this matcher.
-     *
-     * @return  a set view of the mappings contained in this matcher.
-     *
-     * @see Map#entrySet()
-     * @since 4.4.9
-     */
-    public synchronized Set<Entry<String, T>> entrySet() {
-        return new HashSet<>(map.entrySet());
     }
 
     /**

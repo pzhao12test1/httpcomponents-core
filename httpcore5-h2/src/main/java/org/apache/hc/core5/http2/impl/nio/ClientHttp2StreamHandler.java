@@ -41,10 +41,11 @@ import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.HttpVersion;
 import org.apache.hc.core5.http.ProtocolException;
 import org.apache.hc.core5.http.impl.BasicHttpConnectionMetrics;
-import org.apache.hc.core5.http.impl.IncomingEntityDetails;
+import org.apache.hc.core5.http.impl.LazyEntityDetails;
 import org.apache.hc.core5.http.impl.nio.MessageState;
 import org.apache.hc.core5.http.nio.AsyncClientExchangeHandler;
 import org.apache.hc.core5.http.nio.DataStreamChannel;
+import org.apache.hc.core5.http.nio.HttpContextAware;
 import org.apache.hc.core5.http.nio.RequestChannel;
 import org.apache.hc.core5.http.protocol.HttpCoreContext;
 import org.apache.hc.core5.http.protocol.HttpProcessor;
@@ -62,7 +63,6 @@ class ClientHttp2StreamHandler implements Http2StreamHandler {
     private final AsyncClientExchangeHandler exchangeHandler;
     private final HttpCoreContext context;
     private final AtomicBoolean requestCommitted;
-    private final AtomicBoolean failed;
     private final AtomicBoolean done;
 
     private volatile MessageState requestState;
@@ -105,7 +105,6 @@ class ClientHttp2StreamHandler implements Http2StreamHandler {
         this.exchangeHandler = exchangeHandler;
         this.context = context;
         this.requestCommitted = new AtomicBoolean(false);
-        this.failed = new AtomicBoolean(false);
         this.done = new AtomicBoolean(false);
         this.requestState = MessageState.HEADERS;
         this.responseState = MessageState.HEADERS;
@@ -127,6 +126,10 @@ class ClientHttp2StreamHandler implements Http2StreamHandler {
         if (requestCommitted.compareAndSet(false, true)) {
             context.setProtocolVersion(HttpVersion.HTTP_2);
             context.setAttribute(HttpCoreContext.HTTP_REQUEST, request);
+
+            if (exchangeHandler instanceof HttpContextAware) {
+                ((HttpContextAware) exchangeHandler).setContext(context);
+            }
 
             httpProcessor.process(request, entityDetails, context);
 
@@ -188,7 +191,7 @@ class ClientHttp2StreamHandler implements Http2StreamHandler {
                 if (status < HttpStatus.SC_INFORMATIONAL) {
                     throw new ProtocolException("Invalid response: " + status);
                 }
-                if (status > HttpStatus.SC_CONTINUE && status < HttpStatus.SC_SUCCESS) {
+                if (status < HttpStatus.SC_SUCCESS) {
                     exchangeHandler.consumeInformation(response);
                 }
                 if (requestState == MessageState.ACK) {
@@ -201,7 +204,7 @@ class ClientHttp2StreamHandler implements Http2StreamHandler {
                     return;
                 }
 
-                final EntityDetails entityDetails = endStream ? null : new IncomingEntityDetails(response, -1);
+                final EntityDetails entityDetails = endStream ? null : new LazyEntityDetails(response);
                 context.setAttribute(HttpCoreContext.HTTP_RESPONSE, response);
                 httpProcessor.process(response, entityDetails, context);
                 connMetrics.incrementResponseCount();
@@ -240,11 +243,16 @@ class ClientHttp2StreamHandler implements Http2StreamHandler {
     @Override
     public void failed(final Exception cause) {
         try {
-            if (failed.compareAndSet(false, true)) {
-                if (exchangeHandler != null) {
-                    exchangeHandler.failed(cause);
-                }
-            }
+            exchangeHandler.failed(cause);
+        } finally {
+            releaseResources();
+        }
+    }
+
+    @Override
+    public void cancel() {
+        try {
+            exchangeHandler.cancel();
         } finally {
             releaseResources();
         }

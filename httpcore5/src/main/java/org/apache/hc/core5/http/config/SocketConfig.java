@@ -119,7 +119,7 @@ public class SocketConfig {
      * Determines the default value of the {@link java.net.SocketOptions#SO_KEEPALIVE} parameter
      * for newly created sockets.
      * <p>
-     * Default: {@code false}
+     * Default: {@code -1}
      * </p>
      *
      * @return the default value of the {@link java.net.SocketOptions#SO_KEEPALIVE} parameter.
