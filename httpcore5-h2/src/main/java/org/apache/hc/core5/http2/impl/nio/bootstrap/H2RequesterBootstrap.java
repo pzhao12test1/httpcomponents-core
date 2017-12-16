@@ -29,7 +29,6 @@ package org.apache.hc.core5.http2.impl.nio.bootstrap;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.hc.core5.annotation.Experimental;
 import org.apache.hc.core5.function.Decorator;
 import org.apache.hc.core5.function.Supplier;
 import org.apache.hc.core5.http.HttpHost;
@@ -41,21 +40,15 @@ import org.apache.hc.core5.http.impl.nio.ClientHttp1StreamDuplexerFactory;
 import org.apache.hc.core5.http.nio.AsyncPushConsumer;
 import org.apache.hc.core5.http.nio.ssl.TlsStrategy;
 import org.apache.hc.core5.http.protocol.HttpProcessor;
-import org.apache.hc.core5.http.protocol.RequestHandlerRegistry;
-import org.apache.hc.core5.http.protocol.UriPatternType;
 import org.apache.hc.core5.http2.HttpVersionPolicy;
 import org.apache.hc.core5.http2.config.H2Config;
 import org.apache.hc.core5.http2.impl.Http2Processors;
 import org.apache.hc.core5.http2.impl.nio.ClientHttp2StreamMultiplexerFactory;
 import org.apache.hc.core5.http2.impl.nio.ClientHttpProtocolNegotiatorFactory;
 import org.apache.hc.core5.http2.impl.nio.Http2StreamListener;
-import org.apache.hc.core5.http2.nio.support.DefaultAsyncPushConsumerFactory;
 import org.apache.hc.core5.http2.ssl.H2ClientTlsStrategy;
 import org.apache.hc.core5.pool.ConnPoolListener;
-import org.apache.hc.core5.pool.LaxConnPool;
-import org.apache.hc.core5.pool.ManagedConnPool;
-import org.apache.hc.core5.pool.PoolConcurrencyPolicy;
-import org.apache.hc.core5.pool.PoolReusePolicy;
+import org.apache.hc.core5.pool.ConnPoolPolicy;
 import org.apache.hc.core5.pool.StrictConnPool;
 import org.apache.hc.core5.reactor.IOEventHandlerFactory;
 import org.apache.hc.core5.reactor.IOReactorConfig;
@@ -69,8 +62,8 @@ import org.apache.hc.core5.util.TimeValue;
  */
 public class H2RequesterBootstrap {
 
-    private final List<HandlerEntry<Supplier<AsyncPushConsumer>>> pushConsumerList;
-    private UriPatternType uriPatternType;
+    private final List<PushConsumerEntry> pushConsumerList;
+
     private IOReactorConfig ioReactorConfig;
     private HttpProcessor httpProcessor;
     private CharCodingConfig charCodingConfig;
@@ -80,8 +73,7 @@ public class H2RequesterBootstrap {
     private int defaultMaxPerRoute;
     private int maxTotal;
     private TimeValue timeToLive;
-    private PoolReusePolicy poolReusePolicy;
-    private PoolConcurrencyPolicy poolConcurrencyPolicy;
+    private ConnPoolPolicy connPoolPolicy;
     private TlsStrategy tlsStrategy;
     private Decorator<IOSession> ioSessionDecorator;
     private IOSessionListener sessionListener;
@@ -161,19 +153,10 @@ public class H2RequesterBootstrap {
     }
 
     /**
-     * Assigns {@link PoolReusePolicy} instance.
+     * Assigns {@link ConnPoolPolicy} instance.
      */
-    public final H2RequesterBootstrap setPoolReusePolicy(final PoolReusePolicy poolReusePolicy) {
-        this.poolReusePolicy = poolReusePolicy;
-        return this;
-    }
-
-    /**
-     * Assigns {@link PoolConcurrencyPolicy} instance.
-     */
-    @Experimental
-    public final H2RequesterBootstrap setPoolConcurrencyPolicy(final PoolConcurrencyPolicy poolConcurrencyPolicy) {
-        this.poolConcurrencyPolicy = poolConcurrencyPolicy;
+    public final H2RequesterBootstrap setConnPoolPolicy(final ConnPoolPolicy connPoolPolicy) {
+        this.connPoolPolicy = connPoolPolicy;
         return this;
     }
 
@@ -225,67 +208,31 @@ public class H2RequesterBootstrap {
         return this;
     }
 
-    /**
-     * Assigns {@link UriPatternType} for handler registration.
-     */
-    public final H2RequesterBootstrap setUriPatternType(final UriPatternType uriPatternType) {
-        this.uriPatternType = uriPatternType;
-        return this;
-    }
-
-    /**
-     * Registers the given {@link AsyncPushConsumer} {@link Supplier} as a default handler for URIs
-     * matching the given pattern.
-     *
-     * @param uriPattern the pattern to register the handler for.
-     * @param supplier the handler supplier.
-     */
     public final H2RequesterBootstrap register(final String uriPattern, final Supplier<AsyncPushConsumer> supplier) {
         Args.notBlank(uriPattern, "URI pattern");
         Args.notNull(supplier, "Supplier");
-        pushConsumerList.add(new HandlerEntry<>(null, uriPattern, supplier));
+        pushConsumerList.add(new PushConsumerEntry(null, uriPattern, supplier));
         return this;
     }
 
-    /**
-     * Registers the given {@link AsyncPushConsumer} {@link Supplier} as a handler for URIs
-     * matching the given host and the pattern.
-     *
-     * @param hostname the host name
-     * @param uriPattern the pattern to register the handler for.
-     * @param supplier the handler supplier.
-     */
-    public final H2RequesterBootstrap registerVirtual(final String hostname, final String uriPattern, final Supplier<AsyncPushConsumer> supplier) {
+    public final H2RequesterBootstrap register(final String hostname, final String uriPattern, final Supplier<AsyncPushConsumer> supplier) {
         Args.notBlank(hostname, "Hostname");
         Args.notBlank(uriPattern, "URI pattern");
         Args.notNull(supplier, "Supplier");
-        pushConsumerList.add(new HandlerEntry<>(hostname, uriPattern, supplier));
+        pushConsumerList.add(new PushConsumerEntry(hostname, uriPattern, supplier));
         return this;
     }
 
     public Http2AsyncRequester create() {
-        final ManagedConnPool<HttpHost, IOSession> connPool;
-        switch (poolConcurrencyPolicy != null ? poolConcurrencyPolicy : PoolConcurrencyPolicy.STRICT) {
-            case LAX:
-                connPool = new LaxConnPool<>(
-                        defaultMaxPerRoute > 0 ? defaultMaxPerRoute : 20,
-                        timeToLive,
-                        poolReusePolicy,
-                        connPoolListener);
-                break;
-            case STRICT:
-            default:
-                connPool = new StrictConnPool<>(
-                        defaultMaxPerRoute > 0 ? defaultMaxPerRoute : 20,
-                        maxTotal > 0 ? maxTotal : 50,
-                        timeToLive,
-                        poolReusePolicy,
-                        connPoolListener);
-                break;
-        }
-        final RequestHandlerRegistry<Supplier<AsyncPushConsumer>> registry = new RequestHandlerRegistry<>(uriPatternType);
-        for (final HandlerEntry<Supplier<AsyncPushConsumer>> entry: pushConsumerList) {
-            registry.register(entry.hostname, entry.uriPattern, entry.handler);
+        final StrictConnPool<HttpHost, IOSession> connPool = new StrictConnPool<>(
+                defaultMaxPerRoute > 0 ? defaultMaxPerRoute : 20,
+                maxTotal > 0 ? maxTotal : 50,
+                timeToLive,
+                connPoolPolicy,
+                connPoolListener);
+        final AsyncPushConsumerRegistry pushConsumerRegistry = new AsyncPushConsumerRegistry();
+        for (final PushConsumerEntry entry: pushConsumerList) {
+            pushConsumerRegistry.register(entry.hostname, entry.uriPattern, entry.supplier);
         }
         final ClientHttp1StreamDuplexerFactory http1StreamHandlerFactory = new ClientHttp1StreamDuplexerFactory(
                 httpProcessor != null ? httpProcessor : HttpProcessors.client(),
@@ -294,7 +241,7 @@ public class H2RequesterBootstrap {
                 http1StreamListener);
         final ClientHttp2StreamMultiplexerFactory http2StreamHandlerFactory = new ClientHttp2StreamMultiplexerFactory(
                 httpProcessor != null ? httpProcessor : Http2Processors.client(),
-                new DefaultAsyncPushConsumerFactory(registry),
+                pushConsumerRegistry,
                 h2Config != null ? h2Config : H2Config.DEFAULT,
                 charCodingConfig != null ? charCodingConfig : CharCodingConfig.DEFAULT,
                 streamListener);
@@ -310,6 +257,20 @@ public class H2RequesterBootstrap {
                 sessionListener,
                 connPool,
                 tlsStrategy != null ? tlsStrategy : new H2ClientTlsStrategy());
+    }
+
+    private static class PushConsumerEntry {
+
+        final String hostname;
+        final String uriPattern;
+        final Supplier<AsyncPushConsumer> supplier;
+
+        public PushConsumerEntry(final String hostname, final String uriPattern, final Supplier<AsyncPushConsumer> supplier) {
+            this.hostname = hostname;
+            this.uriPattern = uriPattern;
+            this.supplier = supplier;
+        }
+
     }
 
 }

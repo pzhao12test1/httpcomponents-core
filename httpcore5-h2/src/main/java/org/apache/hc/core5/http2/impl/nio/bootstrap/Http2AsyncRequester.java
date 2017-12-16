@@ -36,12 +36,12 @@ import org.apache.hc.core5.http.impl.bootstrap.HttpAsyncRequester;
 import org.apache.hc.core5.http.nio.AsyncClientEndpoint;
 import org.apache.hc.core5.http.nio.ssl.TlsStrategy;
 import org.apache.hc.core5.http2.HttpVersionPolicy;
-import org.apache.hc.core5.pool.ManagedConnPool;
+import org.apache.hc.core5.pool.ControlledConnPool;
 import org.apache.hc.core5.reactor.IOEventHandlerFactory;
 import org.apache.hc.core5.reactor.IOReactorConfig;
 import org.apache.hc.core5.reactor.IOSession;
 import org.apache.hc.core5.reactor.IOSessionListener;
-import org.apache.hc.core5.util.Timeout;
+import org.apache.hc.core5.util.TimeValue;
 
 /**
  * @since 5.0
@@ -56,7 +56,7 @@ public class Http2AsyncRequester extends HttpAsyncRequester {
             final IOEventHandlerFactory eventHandlerFactory,
             final Decorator<IOSession> ioSessionDecorator,
             final IOSessionListener sessionListener,
-            final ManagedConnPool<HttpHost, IOSession> connPool,
+            final ControlledConnPool<HttpHost, IOSession> connPool,
             final TlsStrategy tlsStrategy) {
         super(ioReactorConfig, eventHandlerFactory, ioSessionDecorator, sessionListener, connPool, tlsStrategy);
         this.versionPolicy = versionPolicy != null ? versionPolicy : HttpVersionPolicy.NEGOTIATE;
@@ -65,7 +65,7 @@ public class Http2AsyncRequester extends HttpAsyncRequester {
     @Override
     protected Future<AsyncClientEndpoint> doConnect(
             final HttpHost host,
-            final Timeout timeout,
+            final TimeValue timeout,
             final Object attachment,
             final FutureCallback<AsyncClientEndpoint> callback) {
         return super.doConnect(host, timeout, attachment != null ? attachment : versionPolicy, callback);

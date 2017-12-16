@@ -28,6 +28,7 @@
 package org.apache.hc.core5.testing.classic;
 
 import java.io.IOException;
+import java.net.Socket;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.net.ssl.SSLContext;
@@ -36,22 +37,15 @@ import org.apache.hc.core5.http.ClassicHttpRequest;
 import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.HttpException;
 import org.apache.hc.core5.http.HttpHost;
-import org.apache.hc.core5.http.config.CharCodingConfig;
 import org.apache.hc.core5.http.config.H1Config;
 import org.apache.hc.core5.http.config.SocketConfig;
-import org.apache.hc.core5.http.impl.DefaultConnectionReuseStrategy;
-import org.apache.hc.core5.http.impl.HttpProcessors;
 import org.apache.hc.core5.http.impl.bootstrap.HttpRequester;
-import org.apache.hc.core5.http.impl.io.DefaultBHttpClientConnectionFactory;
-import org.apache.hc.core5.http.impl.io.HttpRequestExecutor;
-import org.apache.hc.core5.http.io.HttpClientConnection;
+import org.apache.hc.core5.http.impl.bootstrap.RequesterBootstrap;
+import org.apache.hc.core5.http.io.HttpConnectionFactory;
 import org.apache.hc.core5.http.protocol.HttpContext;
 import org.apache.hc.core5.http.protocol.HttpProcessor;
 import org.apache.hc.core5.io.ShutdownType;
 import org.apache.hc.core5.net.URIAuthority;
-import org.apache.hc.core5.pool.PoolReusePolicy;
-import org.apache.hc.core5.pool.StrictConnPool;
-import org.apache.hc.core5.util.TimeValue;
 
 public class ClassicTestClient {
 
@@ -81,23 +75,11 @@ public class ClassicTestClient {
 
     public void start(final HttpProcessor httpProcessor) {
         if (requesterRef.get() == null) {
-            final HttpRequestExecutor requestExecutor = new HttpRequestExecutor(
-                    HttpRequestExecutor.DEFAULT_WAIT_FOR_CONTINUE,
-                    DefaultConnectionReuseStrategy.INSTANCE,
-                    LoggingHttp1StreamListener.INSTANCE);
-            final StrictConnPool<HttpHost, HttpClientConnection> connPool = new StrictConnPool<>(
-                    20,
-                    50,
-                    TimeValue.NEG_ONE_MILLISECONDS,
-                    PoolReusePolicy.LIFO,
-                    LoggingConnPoolListener.INSTANCE);
-            final HttpRequester requester = new HttpRequester(
-                    requestExecutor,
-                    httpProcessor != null ? httpProcessor : HttpProcessors.client(),
-                    connPool,
-                    socketConfig,
-                    new DefaultBHttpClientConnectionFactory(H1Config.DEFAULT, CharCodingConfig.DEFAULT),
-                    sslContext != null ? sslContext.getSocketFactory() : null);
+            final HttpRequester requester = RequesterBootstrap.bootstrap()
+                    .setSslSocketFactory(sslContext != null ? sslContext.getSocketFactory() : null)
+                    .setHttpProcessor(httpProcessor)
+                    .setConnectFactory(new LoggingConnFactory())
+                    .create();
             requesterRef.compareAndSet(null, requester);
         } else {
             throw new IllegalStateException("Requester has already been started");
@@ -126,4 +108,13 @@ public class ClassicTestClient {
         return requester.execute(targetHost, request, socketConfig.getSoTimeout(), context);
     }
 
+    class LoggingConnFactory implements HttpConnectionFactory<LoggingBHttpClientConnection> {
+
+        @Override
+        public LoggingBHttpClientConnection createConnection(final Socket socket) throws IOException {
+            final LoggingBHttpClientConnection conn = new LoggingBHttpClientConnection(H1Config.DEFAULT);
+            conn.bind(socket);
+            return conn;
+        }
+    }
 }

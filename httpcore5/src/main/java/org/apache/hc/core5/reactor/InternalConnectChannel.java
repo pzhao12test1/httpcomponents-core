@@ -59,18 +59,14 @@ final class InternalConnectChannel extends InternalChannel {
             if (socketChannel.isConnectionPending()) {
                 socketChannel.finishConnect();
             }
-            //check out connectTimeout
-            final long now = System.currentTimeMillis();
-            if (checkTimeout(now)) {
-                final InternalDataChannel dataChannel = dataChannelFactory.create(
-                        key,
-                        socketChannel,
-                        sessionRequest.remoteEndpoint,
-                        sessionRequest.attachment);
-                key.attach(dataChannel);
-                sessionRequest.completed(dataChannel);
-                dataChannel.handleIOEvent(SelectionKey.OP_CONNECT);
-            }
+            final InternalDataChannel dataChannel = dataChannelFactory.create(
+                    key,
+                    socketChannel,
+                    sessionRequest.remoteEndpoint,
+                    sessionRequest.attachment);
+            key.attach(dataChannel);
+            sessionRequest.completed(dataChannel);
+            dataChannel.handleIOEvent(SelectionKey.OP_CONNECT);
         }
     }
 
@@ -82,7 +78,6 @@ final class InternalConnectChannel extends InternalChannel {
     @Override
     void onTimeout() throws IOException {
         sessionRequest.failed(new SocketTimeoutException());
-        close();
     }
 
     @Override
@@ -103,4 +98,5 @@ final class InternalConnectChannel extends InternalChannel {
         } catch (final IOException ignore) {
         }
     }
+
 }

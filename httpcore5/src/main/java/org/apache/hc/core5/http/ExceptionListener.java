@@ -41,10 +41,6 @@ public interface ExceptionListener {
         public void onError(final Exception ex) {
         }
 
-        @Override
-        public void onError(final HttpConnection connection, final Exception ex) {
-        }
-
     };
 
     ExceptionListener STD_ERR = new ExceptionListener() {
@@ -54,15 +50,8 @@ public interface ExceptionListener {
             ex.printStackTrace();
         }
 
-        @Override
-        public void onError(final HttpConnection connection, final Exception ex) {
-            ex.printStackTrace();
-        }
-
     };
 
     void onError(Exception ex);
-
-    void onError(HttpConnection connection, Exception ex);
 
 }
