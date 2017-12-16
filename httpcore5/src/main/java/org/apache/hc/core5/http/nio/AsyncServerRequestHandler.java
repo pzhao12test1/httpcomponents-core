@@ -24,21 +24,24 @@
  * <http://www.apache.org/>.
  *
  */
-package org.apache.hc.core5.http.nio.support;
+package org.apache.hc.core5.http.nio;
+
+import java.io.IOException;
 
 import org.apache.hc.core5.annotation.Contract;
 import org.apache.hc.core5.annotation.ThreadingBehavior;
 import org.apache.hc.core5.http.HttpException;
 import org.apache.hc.core5.http.HttpRequest;
-import org.apache.hc.core5.http.nio.AsyncRequestConsumer;
 import org.apache.hc.core5.http.protocol.HttpContext;
 
 /**
  * @since 5.0
  */
-@Contract(threading = ThreadingBehavior.SAFE)
-public interface RequestConsumerSupplier<T> {
+@Contract(threading = ThreadingBehavior.STATELESS)
+public interface AsyncServerRequestHandler<T> {
 
-    AsyncRequestConsumer<T> get(HttpRequest request, HttpContext context) throws HttpException;
+    AsyncRequestConsumer<T> prepare(HttpRequest request, HttpContext context) throws HttpException;
+
+    void handle(T requestMessage, AsyncServerResponseTrigger responseTrigger, HttpContext context) throws HttpException, IOException;
 
 }
