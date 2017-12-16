@@ -36,6 +36,6 @@ import org.apache.hc.core5.io.GracefullyCloseable;
  * @param <C> the type of pooled connections.
  * @since 4.2
  */
-public interface ControlledConnPool<T, C extends GracefullyCloseable> extends ConnPool<T, C>, ConnPoolControl<T>, GracefullyCloseable {
+public interface ManagedConnPool<T, C extends GracefullyCloseable> extends ConnPool<T, C>, ConnPoolControl<T>, GracefullyCloseable {
 
 }
