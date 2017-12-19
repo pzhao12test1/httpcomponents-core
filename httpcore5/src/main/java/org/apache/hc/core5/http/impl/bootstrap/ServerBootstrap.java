@@ -27,8 +27,8 @@
 package org.apache.hc.core5.http.impl.bootstrap;
 
 import java.net.InetAddress;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import javax.net.ServerSocketFactory;
 import javax.net.ssl.SSLContext;
@@ -41,7 +41,6 @@ import org.apache.hc.core5.http.HttpResponseFactory;
 import org.apache.hc.core5.http.URIScheme;
 import org.apache.hc.core5.http.config.CharCodingConfig;
 import org.apache.hc.core5.http.config.H1Config;
-import org.apache.hc.core5.http.config.NamedElementChain;
 import org.apache.hc.core5.http.config.SocketConfig;
 import org.apache.hc.core5.http.impl.DefaultConnectionReuseStrategy;
 import org.apache.hc.core5.http.impl.Http1StreamListener;
@@ -51,30 +50,17 @@ import org.apache.hc.core5.http.impl.io.DefaultBHttpServerConnectionFactory;
 import org.apache.hc.core5.http.impl.io.DefaultClassicHttpResponseFactory;
 import org.apache.hc.core5.http.impl.io.HttpService;
 import org.apache.hc.core5.http.io.HttpConnectionFactory;
-import org.apache.hc.core5.http.io.HttpFilterHandler;
+import org.apache.hc.core5.http.io.HttpExpectationVerifier;
 import org.apache.hc.core5.http.io.HttpRequestHandler;
-import org.apache.hc.core5.http.io.HttpServerRequestHandler;
-import org.apache.hc.core5.http.io.support.BasicHttpServerExpectationDecorator;
-import org.apache.hc.core5.http.io.support.BasicHttpServerRequestHandler;
-import org.apache.hc.core5.http.io.support.HttpServerExpectationFilter;
-import org.apache.hc.core5.http.io.support.HttpServerFilterChainElement;
-import org.apache.hc.core5.http.io.support.HttpServerFilterChainRequestHandler;
-import org.apache.hc.core5.http.io.support.TerminalServerFilter;
+import org.apache.hc.core5.http.io.HttpRequestHandlerMapper;
+import org.apache.hc.core5.http.io.UriHttpRequestHandlerMapper;
 import org.apache.hc.core5.http.protocol.HttpProcessor;
-import org.apache.hc.core5.http.protocol.RequestHandlerRegistry;
-import org.apache.hc.core5.http.protocol.UriPatternType;
-import org.apache.hc.core5.net.InetAddressUtils;
-import org.apache.hc.core5.util.Args;
 
 /**
  * @since 4.4
  */
 public class ServerBootstrap {
 
-    private final List<HandlerEntry<HttpRequestHandler>> handlerList;
-    private final List<FilterEntry<HttpFilterHandler>> filters;
-    private String canonicalHostName;
-    private UriPatternType uriPatternType;
     private int listenerPort;
     private InetAddress localAddress;
     private SocketConfig socketConfig;
@@ -83,6 +69,9 @@ public class ServerBootstrap {
     private HttpProcessor httpProcessor;
     private ConnectionReuseStrategy connStrategy;
     private HttpResponseFactory<ClassicHttpResponse> responseFactory;
+    private HttpRequestHandlerMapper handlerMapper;
+    private Map<String, HttpRequestHandler> handlerMap;
+    private HttpExpectationVerifier expectationVerifier;
     private ServerSocketFactory serverSocketFactory;
     private SSLContext sslContext;
     private SSLServerSetupHandler sslSetupHandler;
@@ -91,22 +80,10 @@ public class ServerBootstrap {
     private Http1StreamListener streamListener;
 
     private ServerBootstrap() {
-        this.handlerList = new ArrayList<>();
-        this.filters = new ArrayList<>();
     }
 
     public static ServerBootstrap bootstrap() {
         return new ServerBootstrap();
-    }
-
-    /**
-     * Sets canonical name (fully qualified domain name) of the server.
-     *
-     * @since 5.0
-     */
-    public final ServerBootstrap setCanonicalHostName(final String canonicalHostName) {
-        this.canonicalHostName = canonicalHostName;
-        return this;
     }
 
     /**
@@ -174,40 +151,39 @@ public class ServerBootstrap {
     }
 
     /**
-     * Assigns {@link UriPatternType} for handler registration.
+     * Assigns {@link HttpRequestHandlerMapper} instance.
      */
-    public final ServerBootstrap  setUriPatternType(final UriPatternType uriPatternType) {
-        this.uriPatternType = uriPatternType;
-        return this;
-    }
-
-    /**
-     * Registers the given {@link HttpRequestHandler} as a default handler for URIs
-     * matching the given pattern.
-     *
-     * @param uriPattern the pattern to register the handler for.
-     * @param requestHandler the handler.
-     */
-    public final ServerBootstrap register(final String uriPattern, final HttpRequestHandler requestHandler) {
-        Args.notBlank(uriPattern, "URI pattern");
-        Args.notNull(requestHandler, "Supplier");
-        handlerList.add(new HandlerEntry<>(null, uriPattern, requestHandler));
+    public final ServerBootstrap setHandlerMapper(final HttpRequestHandlerMapper handlerMapper) {
+        this.handlerMapper = handlerMapper;
         return this;
     }
 
     /**
      * Registers the given {@link HttpRequestHandler} as a handler for URIs
-     * matching the given host and the pattern.
+     * matching the given pattern.
+     * <p>
+     * Please note this value can be overridden by the {@link #setHandlerMapper(
+     *HttpRequestHandlerMapper)} method.
      *
-     * @param hostname
-     * @param uriPattern the pattern to register the handler for.
-     * @param requestHandler the handler.
+     * @param pattern the pattern to register the handler for.
+     * @param handler the handler.
      */
-    public final ServerBootstrap registerVirtual(final String hostname, final String uriPattern, final HttpRequestHandler requestHandler) {
-        Args.notBlank(hostname, "Hostname");
-        Args.notBlank(uriPattern, "URI pattern");
-        Args.notNull(requestHandler, "Supplier");
-        handlerList.add(new HandlerEntry<>(hostname, uriPattern, requestHandler));
+    public final ServerBootstrap registerHandler(final String pattern, final HttpRequestHandler handler) {
+        if (pattern == null || handler == null) {
+            return this;
+        }
+        if (handlerMap == null) {
+            handlerMap = new LinkedHashMap<>();
+        }
+        handlerMap.put(pattern, handler);
+        return this;
+    }
+
+    /**
+     * Assigns {@link HttpExpectationVerifier} instance.
+     */
+    public final ServerBootstrap setExpectationVerifier(final HttpExpectationVerifier expectationVerifier) {
+        this.expectationVerifier = expectationVerifier;
         return this;
     }
 
@@ -263,116 +239,37 @@ public class ServerBootstrap {
         return this;
     }
 
-    /**
-     * Adds the filter before the filter with the given name.
-     */
-    public final ServerBootstrap addFilterBefore(final String existing, final String name, final HttpFilterHandler filterHandler) {
-        Args.notBlank(existing, "Existing");
-        Args.notBlank(name, "Name");
-        Args.notNull(filterHandler, "Filter handler");
-        filters.add(new FilterEntry<>(FilterEntry.Postion.BEFORE, name, filterHandler, existing));
-        return this;
-    }
-
-    /**
-     * Adds the filter after the filter with the given name.
-     */
-    public final ServerBootstrap addFilterAfter(final String existing, final String name, final HttpFilterHandler filterHandler) {
-        Args.notBlank(existing, "Existing");
-        Args.notBlank(name, "Name");
-        Args.notNull(filterHandler, "Filter handler");
-        filters.add(new FilterEntry<>(FilterEntry.Postion.AFTER, name, filterHandler, existing));
-        return this;
-    }
-
-    /**
-     * Replace an existing filter with the given name with new filter.
-     */
-    public final ServerBootstrap replaceFilter(final String existing, final HttpFilterHandler filterHandler) {
-        Args.notBlank(existing, "Existing");
-        Args.notNull(filterHandler, "Filter handler");
-        filters.add(new FilterEntry<>(FilterEntry.Postion.REPLACE, existing, filterHandler, existing));
-        return this;
-    }
-
-    /**
-     * Add an filter to the head of the processing list.
-     */
-    public final ServerBootstrap addFilterFirst(final String name, final HttpFilterHandler filterHandler) {
-        Args.notNull(name, "Name");
-        Args.notNull(filterHandler, "Filter handler");
-        filters.add(new FilterEntry<>(FilterEntry.Postion.FIRST, name, filterHandler, null));
-        return this;
-    }
-
-    /**
-     * Add an filter to the tail of the processing list.
-     */
-    public final ServerBootstrap addFilterLast(final String name, final HttpFilterHandler filterHandler) {
-        Args.notNull(name, "Name");
-        Args.notNull(filterHandler, "Filter handler");
-        filters.add(new FilterEntry<>(FilterEntry.Postion.LAST, name, filterHandler, null));
-        return this;
-    }
-
     public HttpServer create() {
-        final RequestHandlerRegistry<HttpRequestHandler> handlerRegistry = new RequestHandlerRegistry<>(
-                canonicalHostName != null ? canonicalHostName : InetAddressUtils.getCanonicalLocalHostName(),
-                uriPatternType);
-        for (final HandlerEntry<HttpRequestHandler> entry: handlerList) {
-            handlerRegistry.register(entry.hostname, entry.uriPattern, entry.handler);
+
+        HttpProcessor httpProcessorCopy = this.httpProcessor;
+        if (httpProcessorCopy == null) {
+            httpProcessorCopy = HttpProcessors.server();
         }
 
-        final HttpServerRequestHandler requestHandler;
-        if (!filters.isEmpty()) {
-            final NamedElementChain<HttpFilterHandler> filterChainDefinition = new NamedElementChain<>();
-            filterChainDefinition.addLast(
-                    new TerminalServerFilter(
-                            handlerRegistry,
-                            this.responseFactory != null ? this.responseFactory : DefaultClassicHttpResponseFactory.INSTANCE),
-                    StandardFilters.MAIN_HANDLER.name());
-            filterChainDefinition.addFirst(
-                    new HttpServerExpectationFilter(),
-                    StandardFilters.EXPECT_CONTINUE.name());
-
-            for (final FilterEntry<HttpFilterHandler> entry: filters) {
-                switch (entry.postion) {
-                    case AFTER:
-                        filterChainDefinition.addAfter(entry.existing, entry.filterHandler, entry.name);
-                        break;
-                    case BEFORE:
-                        filterChainDefinition.addBefore(entry.existing, entry.filterHandler, entry.name);
-                        break;
-                    case REPLACE:
-                        filterChainDefinition.replace(entry.existing, entry.filterHandler);
-                        break;
-                    case FIRST:
-                        filterChainDefinition.addFirst(entry.filterHandler, entry.name);
-                        break;
-                    case LAST:
-                        filterChainDefinition.addLast(entry.filterHandler, entry.name);
-                        break;
+        HttpRequestHandlerMapper handlerMapperCopy = this.handlerMapper;
+        if (handlerMapperCopy == null) {
+            final UriHttpRequestHandlerMapper reqistry = new UriHttpRequestHandlerMapper();
+            if (handlerMap != null) {
+                for (final Map.Entry<String, HttpRequestHandler> entry: handlerMap.entrySet()) {
+                    reqistry.register(entry.getKey(), entry.getValue());
                 }
             }
+            handlerMapperCopy = reqistry;
+        }
 
-            NamedElementChain<HttpFilterHandler>.Node current = filterChainDefinition.getLast();
-            HttpServerFilterChainElement filterChain = null;
-            while (current != null) {
-                filterChain = new HttpServerFilterChainElement(current.getValue(), filterChain);
-                current = current.getPrevious();
-            }
-            requestHandler = new HttpServerFilterChainRequestHandler(filterChain);
-        } else {
-            requestHandler = new BasicHttpServerExpectationDecorator(new BasicHttpServerRequestHandler(
-                    handlerRegistry,
-                    this.responseFactory != null ? this.responseFactory : DefaultClassicHttpResponseFactory.INSTANCE));
+        ConnectionReuseStrategy connStrategyCopy = this.connStrategy;
+        if (connStrategyCopy == null) {
+            connStrategyCopy = DefaultConnectionReuseStrategy.INSTANCE;
+        }
+
+        HttpResponseFactory<ClassicHttpResponse> responseFactoryCopy = this.responseFactory;
+        if (responseFactoryCopy == null) {
+            responseFactoryCopy = DefaultClassicHttpResponseFactory.INSTANCE;
         }
 
         final HttpService httpService = new HttpService(
-                this.httpProcessor != null ? this.httpProcessor : HttpProcessors.server(),
-                requestHandler,
-                this.connStrategy != null ? this.connStrategy : DefaultConnectionReuseStrategy.INSTANCE,
-                this.streamListener);
+                httpProcessorCopy, connStrategyCopy, responseFactoryCopy, handlerMapperCopy,
+                this.expectationVerifier, this.streamListener);
 
         ServerSocketFactory serverSocketFactoryCopy = this.serverSocketFactory;
         if (serverSocketFactoryCopy == null) {
@@ -389,6 +286,11 @@ public class ServerBootstrap {
             connectionFactoryCopy = new DefaultBHttpServerConnectionFactory(scheme, this.h1Config, this.charCodingConfig);
         }
 
+        ExceptionListener exceptionListenerCopy = this.exceptionListener;
+        if (exceptionListenerCopy == null) {
+            exceptionListenerCopy = ExceptionListener.NO_OP;
+        }
+
         return new HttpServer(
                 this.listenerPort > 0 ? this.listenerPort : 0,
                 httpService,
@@ -397,7 +299,7 @@ public class ServerBootstrap {
                 serverSocketFactoryCopy,
                 connectionFactoryCopy,
                 this.sslSetupHandler,
-                this.exceptionListener != null ? this.exceptionListener : ExceptionListener.NO_OP);
+                exceptionListenerCopy);
     }
 
 }

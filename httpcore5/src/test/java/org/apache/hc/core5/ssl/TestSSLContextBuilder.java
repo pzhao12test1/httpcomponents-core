@@ -33,6 +33,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.net.URL;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
@@ -651,9 +652,13 @@ public class TestSSLContextBuilder {
 
     @Test
     public void testSSLHanskshakeProtocolMismatch2() throws Exception {
+
+        final double javaVersion = Double.parseDouble(System.getProperty("java.specification.version"));
         final boolean isWindows = System.getProperty("os.name").contains("Windows");
-        if (isWindows) {
+        if (isWindows && javaVersion < 1.8) {
             thrown.expect(IOException.class);
+        } else if (isWindows && javaVersion < 10) {
+            thrown.expect(SocketException.class);
         } else {
             thrown.expect(SSLHandshakeException.class);
         }

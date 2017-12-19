@@ -59,8 +59,6 @@ import org.apache.hc.core5.reactor.ExceptionEvent;
 import org.apache.hc.core5.reactor.IOReactorConfig;
 import org.apache.hc.core5.reactor.ListenerEndpoint;
 import org.apache.hc.core5.testing.SSLTestContexts;
-import org.apache.hc.core5.testing.classic.LoggingConnPoolListener;
-import org.apache.hc.core5.testing.classic.LoggingHttp1StreamListener;
 import org.apache.hc.core5.util.Timeout;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -111,7 +109,7 @@ public class Http2ProtocolNegotiationTest {
                     })
                     .setIOSessionListener(LoggingIOSessionListener.INSTANCE)
                     .setStreamListener(LoggingHttp2StreamListener.INSTANCE)
-                    .setStreamListener(LoggingHttp1StreamListener.INSTANCE)
+                    .setStreamListener(LoggingHttp1StreamListener.INSTANCE_SERVER)
                     .setIOSessionDecorator(LoggingIOSessionDecorator.INSTANCE)
                     .create();
         }
@@ -153,7 +151,7 @@ public class Http2ProtocolNegotiationTest {
                             .build())
                     .setIOSessionListener(LoggingIOSessionListener.INSTANCE)
                     .setStreamListener(LoggingHttp2StreamListener.INSTANCE)
-                    .setStreamListener(LoggingHttp1StreamListener.INSTANCE)
+                    .setStreamListener(LoggingHttp1StreamListener.INSTANCE_CLIENT)
                     .setConnPoolListener(LoggingConnPoolListener.INSTANCE)
                     .setIOSessionDecorator(LoggingIOSessionDecorator.INSTANCE)
                     .create();

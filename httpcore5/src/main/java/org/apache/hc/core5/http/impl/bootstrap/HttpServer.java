@@ -97,7 +97,7 @@ public class HttpServer implements GracefullyCloseable {
                 H1Config.DEFAULT,
                 CharCodingConfig.DEFAULT);
         this.sslSetupHandler = sslSetupHandler;
-        this.exceptionListener = exceptionListener != null ? exceptionListener : ExceptionListener.NO_OP;
+        this.exceptionListener = exceptionListener;
         this.listenerExecutorService = new ThreadPoolExecutor(
                 1, 1, 0L, TimeUnit.MILLISECONDS,
                 new SynchronousQueue<Runnable>(),
@@ -106,7 +106,7 @@ public class HttpServer implements GracefullyCloseable {
         this.workerExecutorService = new WorkerPoolExecutor(
                 0, Integer.MAX_VALUE, 1L, TimeUnit.SECONDS,
                 new SynchronousQueue<Runnable>(),
-                new DefaultThreadFactory("HTTP-worker", this.workerThreads, true));
+                new DefaultThreadFactory("HTTP-worker", this.workerThreads, false));
         this.status = new AtomicReference<>(Status.READY);
     }
 

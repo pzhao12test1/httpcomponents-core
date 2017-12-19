@@ -32,7 +32,6 @@ import java.io.InterruptedIOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeoutException;
@@ -56,32 +55,28 @@ import org.apache.hc.core5.http.impl.io.HttpRequestExecutor;
 import org.apache.hc.core5.http.io.EofSensorInputStream;
 import org.apache.hc.core5.http.io.EofSensorWatcher;
 import org.apache.hc.core5.http.io.HttpClientConnection;
-import org.apache.hc.core5.http.io.HttpClientResponseHandler;
 import org.apache.hc.core5.http.io.HttpConnectionFactory;
-import org.apache.hc.core5.http.io.HttpResponseInformationCallback;
+import org.apache.hc.core5.http.io.ResponseHandler;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.io.entity.HttpEntityWrapper;
 import org.apache.hc.core5.http.protocol.HttpContext;
 import org.apache.hc.core5.http.protocol.HttpProcessor;
 import org.apache.hc.core5.io.GracefullyCloseable;
 import org.apache.hc.core5.io.ShutdownType;
-import org.apache.hc.core5.net.URIAuthority;
 import org.apache.hc.core5.pool.ConnPoolControl;
-import org.apache.hc.core5.pool.ManagedConnPool;
+import org.apache.hc.core5.pool.ControlledConnPool;
 import org.apache.hc.core5.pool.PoolEntry;
-import org.apache.hc.core5.pool.PoolStats;
 import org.apache.hc.core5.util.Args;
-import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
 
 /**
  * @since 5.0
  */
-public class HttpRequester implements ConnPoolControl<HttpHost>, GracefullyCloseable {
+public class HttpRequester implements GracefullyCloseable {
 
     private final HttpRequestExecutor requestExecutor;
     private final HttpProcessor httpProcessor;
-    private final ManagedConnPool<HttpHost, HttpClientConnection> connPool;
+    private final ControlledConnPool<HttpHost, HttpClientConnection> connPool;
     private final SocketConfig socketConfig;
     private final HttpConnectionFactory<? extends HttpClientConnection> connectFactory;
     private final SSLSocketFactory sslSocketFactory;
@@ -89,7 +84,7 @@ public class HttpRequester implements ConnPoolControl<HttpHost>, GracefullyClose
     public HttpRequester(
             final HttpRequestExecutor requestExecutor,
             final HttpProcessor httpProcessor,
-            final ManagedConnPool<HttpHost, HttpClientConnection> connPool,
+            final ControlledConnPool<HttpHost, HttpClientConnection> connPool,
             final SocketConfig socketConfig,
             final HttpConnectionFactory<? extends HttpClientConnection> connectFactory,
             final SSLSocketFactory sslSocketFactory) {
@@ -102,65 +97,9 @@ public class HttpRequester implements ConnPoolControl<HttpHost>, GracefullyClose
         this.sslSocketFactory = sslSocketFactory != null ? sslSocketFactory : (SSLSocketFactory) SSLSocketFactory.getDefault();
     }
 
-    @Override
-    public PoolStats getTotalStats() {
-        return connPool.getTotalStats();
-    }
-
-    @Override
-    public PoolStats getStats(final HttpHost route) {
-        return connPool.getStats(route);
-    }
-
-    @Override
-    public void setMaxTotal(final int max) {
-        connPool.setMaxTotal(max);
-    }
-
-    @Override
-    public int getMaxTotal() {
-        return connPool.getMaxTotal();
-    }
-
-    @Override
-    public void setDefaultMaxPerRoute(final int max) {
-        connPool.setDefaultMaxPerRoute(max);
-    }
-
-    @Override
-    public int getDefaultMaxPerRoute() {
-        return connPool.getDefaultMaxPerRoute();
-    }
-
-    @Override
-    public void setMaxPerRoute(final HttpHost route, final int max) {
-        connPool.setMaxPerRoute(route, max);
-    }
-
-    @Override
-    public int getMaxPerRoute(final HttpHost route) {
-        return connPool.getMaxPerRoute(route);
-    }
-
-    @Override
-    public void closeIdle(final TimeValue idleTime) {
-        connPool.closeIdle(idleTime);
-    }
-
-    @Override
-    public void closeExpired() {
-        connPool.closeExpired();
-    }
-
-    @Override
-    public Set<HttpHost> getRoutes() {
-        return connPool.getRoutes();
-    }
-
     public ClassicHttpResponse execute(
             final HttpClientConnection connection,
             final ClassicHttpRequest request,
-            final HttpResponseInformationCallback informationCallback,
             final HttpContext context) throws HttpException, IOException {
         Args.notNull(connection, "HTTP connection");
         Args.notNull(request, "HTTP request");
@@ -169,16 +108,9 @@ public class HttpRequester implements ConnPoolControl<HttpHost>, GracefullyClose
             throw new ConnectionClosedException("Connection is closed");
         }
         requestExecutor.preProcess(request, httpProcessor, context);
-        final ClassicHttpResponse response = requestExecutor.execute(request, connection, informationCallback, context);
+        final ClassicHttpResponse response = requestExecutor.execute(request, connection, context);
         requestExecutor.postProcess(response, httpProcessor, context);
         return response;
-    }
-
-    public ClassicHttpResponse execute(
-            final HttpClientConnection connection,
-            final ClassicHttpRequest request,
-            final HttpContext context) throws HttpException, IOException {
-        return execute(connection, request, null, context);
     }
 
     public boolean keepAlive(
@@ -197,7 +129,7 @@ public class HttpRequester implements ConnPoolControl<HttpHost>, GracefullyClose
             final HttpClientConnection connection,
             final ClassicHttpRequest request,
             final HttpContext context,
-            final HttpClientResponseHandler<T> responseHandler) throws HttpException, IOException {
+            final ResponseHandler<T> responseHandler) throws HttpException, IOException {
         try (final ClassicHttpResponse response = execute(connection, request, context)) {
             final T result = responseHandler.handleResponse(response);
             EntityUtils.consume(response.getEntity());
@@ -256,12 +188,11 @@ public class HttpRequester implements ConnPoolControl<HttpHost>, GracefullyClose
     public ClassicHttpResponse execute(
             final HttpHost targetHost,
             final ClassicHttpRequest request,
-            final HttpResponseInformationCallback informationCallback,
             final Timeout connectTimeout,
             final HttpContext context) throws HttpException, IOException {
         Args.notNull(targetHost, "HTTP host");
         Args.notNull(request, "HTTP request");
-        final Future<PoolEntry<HttpHost, HttpClientConnection>> leaseFuture = connPool.lease(targetHost, null, connectTimeout, null);
+        final Future<PoolEntry<HttpHost, HttpClientConnection>> leaseFuture = connPool.lease(targetHost, null, null);
         final PoolEntry<HttpHost, HttpClientConnection> poolEntry;
         final Timeout timeout = Timeout.defaultsToDisabled(connectTimeout);
         try {
@@ -281,10 +212,7 @@ public class HttpRequester implements ConnPoolControl<HttpHost>, GracefullyClose
                 connection = connectFactory.createConnection(socket);
                 poolEntry.assignConnection(connection);
             }
-            if (request.getAuthority() == null) {
-                request.setAuthority(new URIAuthority(targetHost.getHostName(), targetHost.getPort()));
-            }
-            final ClassicHttpResponse response = execute(connection, request, informationCallback, context);
+            final ClassicHttpResponse response = execute(connection, request, context);
             final HttpEntity entity = response.getEntity();
             if (entity != null) {
                 response.setEntity(new HttpEntityWrapper(entity) {
@@ -360,12 +288,6 @@ public class HttpRequester implements ConnPoolControl<HttpHost>, GracefullyClose
                     }
 
                 });
-            } else {
-                final HttpClientConnection localConn = connectionHolder.getConnection();
-                if (!requestExecutor.keepAlive(request, response, localConn, context)) {
-                    localConn.close();
-                }
-                connectionHolder.releaseConnection();
             }
             return response;
         } catch (HttpException | IOException | RuntimeException ex) {
@@ -374,21 +296,13 @@ public class HttpRequester implements ConnPoolControl<HttpHost>, GracefullyClose
         }
     }
 
-    public ClassicHttpResponse execute(
-            final HttpHost targetHost,
-            final ClassicHttpRequest request,
-            final Timeout connectTimeout,
-            final HttpContext context) throws HttpException, IOException {
-        return execute(targetHost, request, null, connectTimeout, context);
-    }
-
     public <T> T  execute(
             final HttpHost targetHost,
             final ClassicHttpRequest request,
             final Timeout connectTimeout,
             final HttpContext context,
-            final HttpClientResponseHandler<T> responseHandler) throws HttpException, IOException {
-        try (final ClassicHttpResponse response = execute(targetHost, request, null, connectTimeout, context)) {
+            final ResponseHandler<T> responseHandler) throws HttpException, IOException {
+        try (final ClassicHttpResponse response = execute(targetHost, request, connectTimeout, context)) {
             final T result = responseHandler.handleResponse(response);
             EntityUtils.consume(response.getEntity());
             return result;

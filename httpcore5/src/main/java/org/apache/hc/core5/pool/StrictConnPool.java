@@ -54,20 +54,20 @@ import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
 
 /**
- * Connection pool with strict connection limit guarantees.
+ * Connection pool with strict max connection limit guarantees.
  *
  * @param <T> route
  * @param <C> connection object
  *
  * @since 4.2
  */
-@Contract(threading = ThreadingBehavior.SAFE)
-public class StrictConnPool<T, C extends GracefullyCloseable> implements ManagedConnPool<T, C> {
+@Contract(threading = ThreadingBehavior.SAFE_CONDITIONAL)
+public class StrictConnPool<T, C extends GracefullyCloseable> implements ControlledConnPool<T, C> {
 
     private final TimeValue timeToLive;
     private final ConnPoolListener<T> connPoolListener;
-    private final PoolReusePolicy policy;
-    private final Map<T, PerRoutePool<T, C>> routeToPool;
+    private final ConnPoolPolicy policy;
+    private final Map<T, RoutePool<T, C>> routeToPool;
     private final LinkedList<LeaseRequest<T, C>> leasingRequests;
     private final Set<PoolEntry<T, C>> leased;
     private final LinkedList<PoolEntry<T, C>> available;
@@ -86,14 +86,14 @@ public class StrictConnPool<T, C extends GracefullyCloseable> implements Managed
             final int defaultMaxPerRoute,
             final int maxTotal,
             final TimeValue timeToLive,
-            final PoolReusePolicy policy,
+            final ConnPoolPolicy policy,
             final ConnPoolListener<T> connPoolListener) {
         super();
         Args.positive(defaultMaxPerRoute, "Max per route value");
         Args.positive(maxTotal, "Max total value");
         this.timeToLive = TimeValue.defaultsToNegativeOneMillisecond(timeToLive);
         this.connPoolListener = connPoolListener;
-        this.policy = policy != null ? policy : PoolReusePolicy.LIFO;
+        this.policy = policy != null ? policy : ConnPoolPolicy.LIFO;
         this.routeToPool = new HashMap<>();
         this.leasingRequests = new LinkedList<>();
         this.leased = new HashSet<>();
@@ -107,7 +107,7 @@ public class StrictConnPool<T, C extends GracefullyCloseable> implements Managed
     }
 
     public StrictConnPool(final int defaultMaxPerRoute, final int maxTotal) {
-        this(defaultMaxPerRoute, maxTotal, TimeValue.NEG_ONE_MILLISECONDS, PoolReusePolicy.LIFO, null);
+        this(defaultMaxPerRoute, maxTotal, TimeValue.NEG_ONE_MILLISECONDS, ConnPoolPolicy.LIFO, null);
     }
 
     public boolean isShutdown() {
@@ -120,7 +120,7 @@ public class StrictConnPool<T, C extends GracefullyCloseable> implements Managed
             fireCallbacks();
             this.lock.lock();
             try {
-                for (final PerRoutePool<T, C> pool: this.routeToPool.values()) {
+                for (final RoutePool<T, C> pool: this.routeToPool.values()) {
                     pool.shutdown(shutdownType);
                 }
                 this.routeToPool.clear();
@@ -138,16 +138,15 @@ public class StrictConnPool<T, C extends GracefullyCloseable> implements Managed
         shutdown(ShutdownType.GRACEFUL);
     }
 
-    private PerRoutePool<T, C> getPool(final T route) {
-        PerRoutePool<T, C> pool = this.routeToPool.get(route);
+    private RoutePool<T, C> getPool(final T route) {
+        RoutePool<T, C> pool = this.routeToPool.get(route);
         if (pool == null) {
-            pool = new PerRoutePool<>(route);
+            pool = new RoutePool<>(route);
             this.routeToPool.put(route, pool);
         }
         return pool;
     }
 
-    @Override
     public Future<PoolEntry<T, C>> lease(
             final T route, final Object state,
             final Timeout requestTimeout,
@@ -173,6 +172,11 @@ public class StrictConnPool<T, C extends GracefullyCloseable> implements Managed
         return future;
     }
 
+    @Override
+    public Future<PoolEntry<T, C>> lease(final T route, final Object state, final FutureCallback<PoolEntry<T, C>> callback) {
+        return lease(route, state, Timeout.DISABLED, callback);
+    }
+
     public Future<PoolEntry<T, C>> lease(final T route, final Object state) {
         return lease(route, state, Timeout.DISABLED, null);
     }
@@ -191,10 +195,7 @@ public class StrictConnPool<T, C extends GracefullyCloseable> implements Managed
         this.lock.lock();
         try {
             if (this.leased.remove(entry)) {
-                if (this.connPoolListener != null) {
-                    this.connPoolListener.onRelease(entry.getRoute(), this);
-                }
-                final PerRoutePool<T, C> pool = getPool(entry.getRoute());
+                final RoutePool<T, C> pool = getPool(entry.getRoute());
                 final boolean keepAlive = entry.hasConnection() && reusable;
                 pool.free(entry, keepAlive);
                 if (keepAlive) {
@@ -208,12 +209,13 @@ public class StrictConnPool<T, C extends GracefullyCloseable> implements Managed
                         default:
                             throw new IllegalStateException("Unexpected ConnPoolPolicy value: " + policy);
                     }
+                    if (this.connPoolListener != null) {
+                        this.connPoolListener.onRelease(entry.getRoute(), this);
+                    }
                 } else {
                     entry.discardConnection(ShutdownType.GRACEFUL);
                 }
                 processNextPendingRequest();
-            } else {
-                throw new IllegalStateException("Pool entry is not present in the set of leased entries");
             }
         } finally {
             this.lock.unlock();
@@ -273,7 +275,7 @@ public class StrictConnPool<T, C extends GracefullyCloseable> implements Managed
             return false;
         }
 
-        final PerRoutePool<T, C> pool = getPool(route);
+        final RoutePool<T, C> pool = getPool(route);
         PoolEntry<T, C> entry;
         for (;;) {
             entry = pool.getFree(state);
@@ -324,7 +326,7 @@ public class StrictConnPool<T, C extends GracefullyCloseable> implements Managed
                 if (!this.available.isEmpty()) {
                     final PoolEntry<T, C> lastUsed = this.available.removeLast();
                     lastUsed.discardConnection(ShutdownType.GRACEFUL);
-                    final PerRoutePool<T, C> otherpool = getPool(lastUsed.getRoute());
+                    final RoutePool<T, C> otherpool = getPool(lastUsed.getRoute());
                     otherpool.remove(lastUsed);
                 }
             }
@@ -481,7 +483,7 @@ public class StrictConnPool<T, C extends GracefullyCloseable> implements Managed
         Args.notNull(route, "Route");
         this.lock.lock();
         try {
-            final PerRoutePool<T, C> pool = getPool(route);
+            final RoutePool<T, C> pool = getPool(route);
             int pendingCount = 0;
             for (final LeaseRequest<T, C> request: leasingRequests) {
                 if (LangUtils.equals(route, request.getRoute())) {
@@ -503,7 +505,6 @@ public class StrictConnPool<T, C extends GracefullyCloseable> implements Managed
      *
      * @since 4.4
      */
-    @Override
     public Set<T> getRoutes() {
         this.lock.lock();
         try {
@@ -526,7 +527,7 @@ public class StrictConnPool<T, C extends GracefullyCloseable> implements Managed
                 final PoolEntry<T, C> entry = it.next();
                 callback.execute(entry);
                 if (!entry.hasConnection()) {
-                    final PerRoutePool<T, C> pool = getPool(entry.getRoute());
+                    final RoutePool<T, C> pool = getPool(entry.getRoute());
                     pool.remove(entry);
                     it.remove();
                 }
@@ -558,10 +559,10 @@ public class StrictConnPool<T, C extends GracefullyCloseable> implements Managed
     }
 
     private void purgePoolMap() {
-        final Iterator<Map.Entry<T, PerRoutePool<T, C>>> it = this.routeToPool.entrySet().iterator();
+        final Iterator<Map.Entry<T, RoutePool<T, C>>> it = this.routeToPool.entrySet().iterator();
         while (it.hasNext()) {
-            final Map.Entry<T, PerRoutePool<T, C>> entry = it.next();
-            final PerRoutePool<T, C> pool = entry.getValue();
+            final Map.Entry<T, RoutePool<T, C>> entry = it.next();
+            final RoutePool<T, C> pool = entry.getValue();
             if (pool.getAllocatedCount() == 0) {
                 it.remove();
             }
@@ -611,191 +612,4 @@ public class StrictConnPool<T, C extends GracefullyCloseable> implements Managed
         return buffer.toString();
     }
 
-
-    static class LeaseRequest<T, C extends GracefullyCloseable> {
-
-        private final T route;
-        private final Object state;
-        private final long deadline;
-        private final BasicFuture<PoolEntry<T, C>> future;
-        private final AtomicBoolean completed;
-        private volatile PoolEntry<T, C> result;
-        private volatile Exception ex;
-
-        /**
-         * Constructor
-         *
-         * @param route route
-         * @param state state
-         * @param requestTimeout timeout to wait in a request queue until kicked off
-         * @param future future callback
-         */
-        public LeaseRequest(
-                final T route,
-                final Object state,
-                final Timeout requestTimeout,
-                final BasicFuture<PoolEntry<T, C>> future) {
-            super();
-            this.route = route;
-            this.state = state;
-            this.deadline = Timeout.calculateDeadline(System.currentTimeMillis(), requestTimeout);
-            this.future = future;
-            this.completed = new AtomicBoolean(false);
-        }
-
-        public T getRoute() {
-            return this.route;
-        }
-
-        public Object getState() {
-            return this.state;
-        }
-
-        public long getDeadline() {
-            return this.deadline;
-        }
-
-        public boolean isDone() {
-            return this.completed.get();
-        }
-
-        public void failed(final Exception ex) {
-            if (this.completed.compareAndSet(false, true)) {
-                this.ex = ex;
-            }
-        }
-
-        public void completed(final PoolEntry<T, C> result) {
-            if (this.completed.compareAndSet(false, true)) {
-                this.result = result;
-            }
-        }
-
-        public BasicFuture<PoolEntry<T, C>> getFuture() {
-            return this.future;
-        }
-
-        public PoolEntry<T, C> getResult() {
-            return this.result;
-        }
-
-        public Exception getException() {
-            return this.ex;
-        }
-
-        @Override
-        public String toString() {
-            final StringBuilder buffer = new StringBuilder();
-            buffer.append("[");
-            buffer.append(this.route);
-            buffer.append("][");
-            buffer.append(this.state);
-            buffer.append("]");
-            return buffer.toString();
-        }
-
-    }
-
-    static class PerRoutePool<T, C extends GracefullyCloseable> {
-
-        private final T route;
-        private final Set<PoolEntry<T, C>> leased;
-        private final LinkedList<PoolEntry<T, C>> available;
-
-        PerRoutePool(final T route) {
-            super();
-            this.route = route;
-            this.leased = new HashSet<>();
-            this.available = new LinkedList<>();
-        }
-
-        public final T getRoute() {
-            return route;
-        }
-
-        public int getLeasedCount() {
-            return this.leased.size();
-        }
-
-        public int getAvailableCount() {
-            return this.available.size();
-        }
-
-        public int getAllocatedCount() {
-            return this.available.size() + this.leased.size();
-        }
-
-        public PoolEntry<T, C> getFree(final Object state) {
-            if (!this.available.isEmpty()) {
-                if (state != null) {
-                    final Iterator<PoolEntry<T, C>> it = this.available.iterator();
-                    while (it.hasNext()) {
-                        final PoolEntry<T, C> entry = it.next();
-                        if (state.equals(entry.getState())) {
-                            it.remove();
-                            this.leased.add(entry);
-                            return entry;
-                        }
-                    }
-                }
-                final Iterator<PoolEntry<T, C>> it = this.available.iterator();
-                while (it.hasNext()) {
-                    final PoolEntry<T, C> entry = it.next();
-                    if (entry.getState() == null) {
-                        it.remove();
-                        this.leased.add(entry);
-                        return entry;
-                    }
-                }
-            }
-            return null;
-        }
-
-        public PoolEntry<T, C> getLastUsed() {
-            return this.available.peekLast();
-        }
-
-        public boolean remove(final PoolEntry<T, C> entry) {
-            return this.available.remove(entry) || this.leased.remove(entry);
-        }
-
-        public void free(final PoolEntry<T, C> entry, final boolean reusable) {
-            final boolean found = this.leased.remove(entry);
-            Asserts.check(found, "Entry %s has not been leased from this pool", entry);
-            if (reusable) {
-                this.available.addFirst(entry);
-            }
-        }
-
-        public PoolEntry<T, C> createEntry(final TimeValue timeToLive) {
-            final PoolEntry<T, C> entry = new PoolEntry<>(this.route, timeToLive);
-            this.leased.add(entry);
-            return entry;
-        }
-
-        public void shutdown(final ShutdownType shutdownType) {
-            PoolEntry<T, C> availableEntry;
-            while ((availableEntry = available.poll()) != null) {
-                availableEntry.discardConnection(shutdownType);
-            }
-            for (final PoolEntry<T, C> entry: this.leased) {
-                entry.discardConnection(shutdownType);
-            }
-            this.leased.clear();
-        }
-
-        @Override
-        public String toString() {
-            final StringBuilder buffer = new StringBuilder();
-            buffer.append("[route: ");
-            buffer.append(this.route);
-            buffer.append("][leased: ");
-            buffer.append(this.leased.size());
-            buffer.append("][available: ");
-            buffer.append(this.available.size());
-            buffer.append("]");
-            return buffer.toString();
-        }
-
-    }
 }

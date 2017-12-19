@@ -28,7 +28,6 @@ package org.apache.hc.core5.http.impl.bootstrap;
 
 import javax.net.ssl.SSLSocketFactory;
 
-import org.apache.hc.core5.annotation.Experimental;
 import org.apache.hc.core5.http.ConnectionReuseStrategy;
 import org.apache.hc.core5.http.HttpHost;
 import org.apache.hc.core5.http.config.CharCodingConfig;
@@ -43,10 +42,7 @@ import org.apache.hc.core5.http.io.HttpClientConnection;
 import org.apache.hc.core5.http.io.HttpConnectionFactory;
 import org.apache.hc.core5.http.protocol.HttpProcessor;
 import org.apache.hc.core5.pool.ConnPoolListener;
-import org.apache.hc.core5.pool.LaxConnPool;
-import org.apache.hc.core5.pool.ManagedConnPool;
-import org.apache.hc.core5.pool.PoolConcurrencyPolicy;
-import org.apache.hc.core5.pool.PoolReusePolicy;
+import org.apache.hc.core5.pool.ConnPoolPolicy;
 import org.apache.hc.core5.pool.StrictConnPool;
 import org.apache.hc.core5.util.Timeout;
 
@@ -63,8 +59,7 @@ public class RequesterBootstrap {
     private int defaultMaxPerRoute;
     private int maxTotal;
     private Timeout timeToLive;
-    private PoolReusePolicy poolReusePolicy;
-    private PoolConcurrencyPolicy poolConcurrencyPolicy;
+    private ConnPoolPolicy connPoolPolicy;
     private Http1StreamListener streamListener;
     private ConnPoolListener<HttpHost> connPoolListener;
 
@@ -99,7 +94,7 @@ public class RequesterBootstrap {
         return this;
     }
 
-    public final RequesterBootstrap setConnectionFactory(final HttpConnectionFactory<? extends HttpClientConnection> connectFactory) {
+    public final RequesterBootstrap setConnectFactory(final HttpConnectionFactory<? extends HttpClientConnection> connectFactory) {
         this.connectFactory = connectFactory;
         return this;
     }
@@ -124,14 +119,8 @@ public class RequesterBootstrap {
         return this;
     }
 
-    public final RequesterBootstrap setPoolReusePolicy(final PoolReusePolicy poolReusePolicy) {
-        this.poolReusePolicy = poolReusePolicy;
-        return this;
-    }
-
-    @Experimental
-    public final RequesterBootstrap setPoolConcurrencyPolicy(final PoolConcurrencyPolicy poolConcurrencyPolicy) {
-        this.poolConcurrencyPolicy = poolConcurrencyPolicy;
+    public final RequesterBootstrap setConnPoolPolicy(final ConnPoolPolicy connPoolPolicy) {
+        this.connPoolPolicy = connPoolPolicy;
         return this;
     }
 
@@ -150,25 +139,12 @@ public class RequesterBootstrap {
                 HttpRequestExecutor.DEFAULT_WAIT_FOR_CONTINUE,
                 connReuseStrategy != null ? connReuseStrategy : DefaultConnectionReuseStrategy.INSTANCE,
                 streamListener);
-        final ManagedConnPool<HttpHost, HttpClientConnection> connPool;
-        switch (poolConcurrencyPolicy != null ? poolConcurrencyPolicy : PoolConcurrencyPolicy.STRICT) {
-            case LAX:
-                connPool = new LaxConnPool<>(
-                        defaultMaxPerRoute > 0 ? defaultMaxPerRoute : 20,
-                        timeToLive,
-                        poolReusePolicy,
-                        connPoolListener);
-                break;
-            case STRICT:
-            default:
-                connPool = new StrictConnPool<>(
-                        defaultMaxPerRoute > 0 ? defaultMaxPerRoute : 20,
-                        maxTotal > 0 ? maxTotal : 50,
-                        timeToLive,
-                        poolReusePolicy,
-                        connPoolListener);
-                break;
-        }
+        final StrictConnPool<HttpHost, HttpClientConnection> connPool = new StrictConnPool<>(
+                defaultMaxPerRoute > 0 ? defaultMaxPerRoute : 20,
+                maxTotal > 0 ? maxTotal : 50,
+                timeToLive,
+                connPoolPolicy,
+                connPoolListener);
         return new HttpRequester(
                 requestExecutor,
                 httpProcessor != null ? httpProcessor : HttpProcessors.client(),

@@ -40,12 +40,13 @@ import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.HttpVersion;
 import org.apache.hc.core5.http.ProtocolException;
 import org.apache.hc.core5.http.impl.BasicHttpConnectionMetrics;
-import org.apache.hc.core5.http.impl.IncomingEntityDetails;
+import org.apache.hc.core5.http.impl.LazyEntityDetails;
 import org.apache.hc.core5.http.impl.nio.MessageState;
 import org.apache.hc.core5.http.nio.AsyncPushProducer;
 import org.apache.hc.core5.http.nio.AsyncServerExchangeHandler;
 import org.apache.hc.core5.http.nio.DataStreamChannel;
 import org.apache.hc.core5.http.nio.HandlerFactory;
+import org.apache.hc.core5.http.nio.HttpContextAware;
 import org.apache.hc.core5.http.nio.ResponseChannel;
 import org.apache.hc.core5.http.protocol.HttpCoreContext;
 import org.apache.hc.core5.http.protocol.HttpProcessor;
@@ -182,11 +183,11 @@ public class ServerHttp2StreamHandler implements Http2StreamHandler {
                 requestState = endStream ? MessageState.COMPLETE : MessageState.BODY;
 
                 final HttpRequest request = DefaultH2RequestConverter.INSTANCE.convert(headers);
-                final EntityDetails requestEntityDetails = endStream ? null : new IncomingEntityDetails(request, -1);
+                final EntityDetails requestEntityDetails = endStream ? null : new LazyEntityDetails(request);
 
                 final AsyncServerExchangeHandler handler;
                 try {
-                    handler = exchangeHandlerFactory != null ? exchangeHandlerFactory.create(request, context) : null;
+                    handler = exchangeHandlerFactory != null ? exchangeHandlerFactory.create(request) : null;
                 } catch (final ProtocolException ex) {
                     throw new H2StreamResetException(H2Error.PROTOCOL_ERROR, ex.getMessage());
                 }
@@ -197,6 +198,10 @@ public class ServerHttp2StreamHandler implements Http2StreamHandler {
 
                 context.setProtocolVersion(HttpVersion.HTTP_2);
                 context.setAttribute(HttpCoreContext.HTTP_REQUEST, request);
+
+                if (exchangeHandler instanceof HttpContextAware) {
+                    ((HttpContextAware) exchangeHandler).setContext(context);
+                }
 
                 httpProcessor.process(request, requestEntityDetails, context);
                 connMetrics.incrementRequestCount();
@@ -221,7 +226,7 @@ public class ServerHttp2StreamHandler implements Http2StreamHandler {
                         commitPromise(promise, pushProducer);
                     }
 
-                }, context);
+                });
                 break;
             case BODY:
                 responseState = MessageState.COMPLETE;

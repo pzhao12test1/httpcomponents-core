@@ -28,7 +28,6 @@
 package org.apache.hc.core5.http.examples;
 
 import java.io.IOException;
-import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.util.Arrays;
 import java.util.Collections;
@@ -55,6 +54,8 @@ import org.apache.hc.core5.http.impl.bootstrap.RequesterBootstrap;
 import org.apache.hc.core5.http.impl.bootstrap.ServerBootstrap;
 import org.apache.hc.core5.http.io.HttpRequestHandler;
 import org.apache.hc.core5.http.message.BasicClassicHttpRequest;
+import org.apache.hc.core5.http.message.RequestLine;
+import org.apache.hc.core5.http.message.StatusLine;
 import org.apache.hc.core5.http.protocol.HttpContext;
 import org.apache.hc.core5.http.protocol.HttpCoreContext;
 import org.apache.hc.core5.io.ShutdownType;
@@ -87,19 +88,22 @@ public class ClassicReverseProxyExample {
 
                     @Override
                     public void onRequestHead(final HttpConnection connection, final HttpRequest request) {
-                        System.out.println("[proxy->origin] " + Thread.currentThread()  + " " +
-                                request.getMethod() + " " + request.getRequestUri());
+                        System.out.println(connection + " >> " + new RequestLine(request));
+
                     }
 
                     @Override
                     public void onResponseHead(final HttpConnection connection, final HttpResponse response) {
-                        System.out.println("[proxy<-origin] " + Thread.currentThread()  + " status " + response.getCode());
+                        System.out.println(connection + " << " + new StatusLine(response));
                     }
 
                     @Override
                     public void onExchangeComplete(final HttpConnection connection, final boolean keepAlive) {
-                        System.out.println("[proxy<-origin] " + Thread.currentThread() + " exchange completed; " +
-                                "connection " + (keepAlive ? "kept alive" : "cannot be kept alive"));
+                        if (keepAlive) {
+                            System.out.println(connection + " >> can be kept alive");
+                        } else {
+                            System.out.println(connection + " >> cannot be kept alive");
+                        }
                     }
 
                 })
@@ -107,17 +111,14 @@ public class ClassicReverseProxyExample {
 
                     @Override
                     public void onLease(final HttpHost route, final ConnPoolStats<HttpHost> connPoolStats) {
-                        StringBuilder buf = new StringBuilder();
-                        buf.append("[proxy->origin] " + Thread.currentThread()  + " connection leased ").append(route);
-                        System.out.println(buf.toString());
                     }
 
                     @Override
                     public void onRelease(final HttpHost route, final ConnPoolStats<HttpHost> connPoolStats) {
                         StringBuilder buf = new StringBuilder();
-                        buf.append("[proxy->origin] " + Thread.currentThread()  + " connection released ").append(route);
+                        buf.append(route).append(" ");
                         PoolStats totals = connPoolStats.getTotalStats();
-                        buf.append("; total kept alive: ").append(totals.getAvailable()).append("; ");
+                        buf.append(" total kept alive: ").append(totals.getAvailable()).append("; ");
                         buf.append("total allocated: ").append(totals.getLeased() + totals.getAvailable());
                         buf.append(" of ").append(totals.getMax());
                         System.out.println(buf.toString());
@@ -132,19 +133,22 @@ public class ClassicReverseProxyExample {
 
                     @Override
                     public void onRequestHead(final HttpConnection connection, final HttpRequest request) {
-                        System.out.println("[client->proxy] " + Thread.currentThread() + " " +
-                                request.getMethod() + " " + request.getRequestUri());
+                        System.out.println(connection + " >> " + new RequestLine(request));
+
                     }
 
                     @Override
                     public void onResponseHead(final HttpConnection connection, final HttpResponse response) {
-                        System.out.println("[client<-proxy] " + Thread.currentThread() + " status " + response.getCode());
+                        System.out.println(connection + " << " + new StatusLine(response));
                     }
 
                     @Override
                     public void onExchangeComplete(final HttpConnection connection, final boolean keepAlive) {
-                        System.out.println("[client<-proxy] " + Thread.currentThread() + " exchange completed; " +
-                                "connection " + (keepAlive ? "kept alive" : "cannot be kept alive"));
+                        if (keepAlive) {
+                            System.out.println(connection + " >> can be kept alive");
+                        } else {
+                            System.out.println(connection + " >> cannot be kept alive");
+                        }
                     }
 
                 })
@@ -152,28 +156,17 @@ public class ClassicReverseProxyExample {
 
                     @Override
                     public void onError(final Exception ex) {
-                        if (ex instanceof SocketException) {
-                            System.out.println("[client->proxy] " + Thread.currentThread() + " " + ex.getMessage());
-                        } else {
-                            System.out.println("[client->proxy] " + Thread.currentThread()  + " " + ex.getMessage());
-                            ex.printStackTrace(System.out);
-                        }
-                    }
-
-                    @Override
-                    public void onError(final HttpConnection connection, final Exception ex) {
                         if (ex instanceof SocketTimeoutException) {
-                            System.out.println("[client->proxy] " + Thread.currentThread() + " time out");
-                        } else if (ex instanceof SocketException || ex instanceof ConnectionClosedException) {
-                            System.out.println("[client->proxy] " + Thread.currentThread() + " " + ex.getMessage());
+                            System.err.println("Connection timed out");
+                        } else if (ex instanceof ConnectionClosedException) {
+                            System.err.println(ex.getMessage());
                         } else {
-                            System.out.println("[client->proxy] " + Thread.currentThread() + " " + ex.getMessage());
-                            ex.printStackTrace(System.out);
+                            ex.printStackTrace();
                         }
                     }
 
                 })
-                .register("*", new ProxyHandler(targetHost, requester))
+                .registerHandler("*", new ProxyHandler(targetHost, requester))
                 .create();
 
         server.start();
@@ -190,7 +183,6 @@ public class ClassicReverseProxyExample {
     }
 
     private final static Set<String> HOP_BY_HOP = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
-            HttpHeaders.HOST.toLowerCase(Locale.ROOT),
             HttpHeaders.CONTENT_LENGTH.toLowerCase(Locale.ROOT),
             HttpHeaders.TRANSFER_ENCODING.toLowerCase(Locale.ROOT),
             HttpHeaders.CONNECTION.toLowerCase(Locale.ROOT),
@@ -221,17 +213,13 @@ public class ClassicReverseProxyExample {
                 final HttpContext serverContext) throws HttpException, IOException {
 
             final HttpCoreContext clientContext = HttpCoreContext.create();
-            final ClassicHttpRequest outgoingRequest = new BasicClassicHttpRequest(
-                    incomingRequest.getMethod(),
-                    targetHost,
-                    incomingRequest.getPath());
+            final ClassicHttpRequest outgoingRequest = new BasicClassicHttpRequest(incomingRequest.getMethod(), incomingRequest.getPath());
             for (Iterator<Header> it = incomingRequest.headerIterator(); it.hasNext(); ) {
                 Header header = it.next();
                 if (!HOP_BY_HOP.contains(header.getName().toLowerCase(Locale.ROOT))) {
                     outgoingRequest.addHeader(header);
                 }
             }
-            outgoingRequest.setEntity(incomingRequest.getEntity());
             final ClassicHttpResponse incomingResponse = requester.execute(
                     targetHost, outgoingRequest, Timeout.ofMinutes(1), clientContext);
             outgoingResponse.setCode(incomingResponse.getCode());

@@ -35,14 +35,15 @@ import org.apache.hc.core5.concurrent.FutureCallback;
 import org.apache.hc.core5.http.EntityDetails;
 import org.apache.hc.core5.http.Header;
 import org.apache.hc.core5.http.HttpException;
+import org.apache.hc.core5.http.HttpHeaders;
 import org.apache.hc.core5.http.HttpRequest;
-import org.apache.hc.core5.http.HttpResponse;
 import org.apache.hc.core5.http.HttpStatus;
+import org.apache.hc.core5.http.message.BasicHttpResponse;
+import org.apache.hc.core5.http.nio.HttpContextAware;
 import org.apache.hc.core5.http.nio.AsyncPushProducer;
 import org.apache.hc.core5.http.nio.AsyncRequestConsumer;
 import org.apache.hc.core5.http.nio.AsyncResponseProducer;
 import org.apache.hc.core5.http.nio.AsyncServerExchangeHandler;
-import org.apache.hc.core5.http.nio.AsyncServerRequestHandler;
 import org.apache.hc.core5.http.nio.BasicResponseProducer;
 import org.apache.hc.core5.http.nio.CapacityChannel;
 import org.apache.hc.core5.http.nio.DataStreamChannel;
@@ -53,14 +54,23 @@ import org.apache.hc.core5.util.Asserts;
 /**
  * @since 5.0
  */
-public abstract class AbstractServerExchangeHandler<T> implements AsyncServerExchangeHandler {
+public abstract class AbstractServerExchangeHandler<T> implements HttpContextAware, AsyncServerExchangeHandler {
 
     private final AtomicReference<AsyncRequestConsumer<T>> requestConsumerRef;
     private final AtomicReference<AsyncResponseProducer> responseProducerRef;
 
+    private volatile HttpContext context;
+    private volatile boolean expectationFailed;
+
     public AbstractServerExchangeHandler() {
         this.requestConsumerRef = new AtomicReference<>(null);
         this.responseProducerRef = new AtomicReference<>(null);
+    }
+
+    protected AsyncResponseProducer verify(
+            final HttpRequest request,
+            final HttpContext context) throws IOException, HttpException {
+        return null;
     }
 
     protected abstract AsyncRequestConsumer<T> supplyConsumer(
@@ -69,33 +79,47 @@ public abstract class AbstractServerExchangeHandler<T> implements AsyncServerExc
 
     protected abstract void handle(
             T requestMessage,
-            AsyncServerRequestHandler.ResponseTrigger responseTrigger,
+            ResponseTrigger responseTrigger,
             HttpContext context) throws HttpException, IOException;
+
+    @Override
+    public void setContext(final HttpContext context) {
+        this.context = context;
+    }
 
     @Override
     public final void handleRequest(
             final HttpRequest request,
             final EntityDetails entityDetails,
-            final ResponseChannel responseChannel,
-            final HttpContext context) throws HttpException, IOException {
+            final ResponseChannel responseChannel) throws HttpException, IOException {
 
         final AsyncRequestConsumer<T> requestConsumer = supplyConsumer(request, context);
         if (requestConsumer == null) {
             throw new HttpException("Unable to handle request");
         }
         requestConsumerRef.set(requestConsumer);
-        final AsyncServerRequestHandler.ResponseTrigger responseTrigger = new AsyncServerRequestHandler.ResponseTrigger() {
 
-            @Override
-            public void sendInformation(final HttpResponse response) throws HttpException, IOException {
-                responseChannel.sendInformation(response);
+        if (entityDetails != null) {
+            final Header h = request.getFirstHeader(HttpHeaders.EXPECT);
+            if (h != null && "100-continue".equalsIgnoreCase(h.getValue())) {
+                final AsyncResponseProducer producer = verify(request, context);
+                if (producer != null) {
+                    expectationFailed = true;
+                    responseProducerRef.set(producer);
+                    responseChannel.sendResponse(producer.produceResponse(), producer.getEntityDetails());
+                    return;
+                } else {
+                    responseChannel.sendInformation(new BasicHttpResponse(HttpStatus.SC_CONTINUE));
+                }
             }
+        }
+        final ResponseTrigger responseTrigger = new ResponseTrigger() {
 
             @Override
             public void submitResponse(
                     final AsyncResponseProducer producer) throws HttpException, IOException {
                 if (responseProducerRef.compareAndSet(null, producer)) {
-                    producer.sendResponse(responseChannel);
+                    responseChannel.sendResponse(producer.produceResponse(), producer.getEntityDetails());
                 }
             }
 
@@ -145,23 +169,33 @@ public abstract class AbstractServerExchangeHandler<T> implements AsyncServerExc
 
     @Override
     public final void updateCapacity(final CapacityChannel capacityChannel) throws IOException {
-        final AsyncRequestConsumer<T> requestConsumer = requestConsumerRef.get();
-        Asserts.notNull(requestConsumer, "Data consumer");
-        requestConsumer.updateCapacity(capacityChannel);
+        if (!expectationFailed) {
+            final AsyncRequestConsumer<T> requestConsumer = requestConsumerRef.get();
+            Asserts.notNull(requestConsumer, "Data consumer");
+            requestConsumer.updateCapacity(capacityChannel);
+        } else {
+            capacityChannel.update(Integer.MAX_VALUE);
+        }
     }
 
     @Override
     public final int consume(final ByteBuffer src) throws IOException {
-        final AsyncRequestConsumer<T> requestConsumer = requestConsumerRef.get();
-        Asserts.notNull(requestConsumer, "Data consumer");
-        return requestConsumer.consume(src);
+        if (!expectationFailed) {
+            final AsyncRequestConsumer<T> requestConsumer = requestConsumerRef.get();
+            Asserts.notNull(requestConsumer, "Data consumer");
+            return requestConsumer.consume(src);
+        } else {
+            return Integer.MAX_VALUE;
+        }
     }
 
     @Override
     public final void streamEnd(final List<? extends Header> trailers) throws HttpException, IOException {
-        final AsyncRequestConsumer<T> requestConsumer = requestConsumerRef.get();
-        Asserts.notNull(requestConsumer, "Data consumer");
-        requestConsumer.streamEnd(trailers);
+        if (!expectationFailed) {
+            final AsyncRequestConsumer<T> requestConsumer = requestConsumerRef.get();
+            Asserts.notNull(requestConsumer, "Data consumer");
+            requestConsumer.streamEnd(trailers);
+        }
     }
 
     @Override

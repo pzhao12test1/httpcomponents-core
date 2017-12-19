@@ -26,8 +26,6 @@
  */
 package org.apache.hc.core5.pool;
 
-import java.util.Set;
-
 import org.apache.hc.core5.util.TimeValue;
 
 /**
@@ -56,7 +54,5 @@ public interface ConnPoolControl<T> extends ConnPoolStats<T> {
     void closeIdle(TimeValue idleTime);
 
     void closeExpired();
-
-    Set<T> getRoutes();
 
 }
