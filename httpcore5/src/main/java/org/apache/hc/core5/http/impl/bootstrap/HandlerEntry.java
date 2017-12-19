@@ -24,28 +24,18 @@
  * <http://www.apache.org/>.
  *
  */
-package org.apache.hc.core5.http.nio;
+package org.apache.hc.core5.http.impl.bootstrap;
 
-import java.io.IOException;
+final class HandlerEntry<T> {
 
-import org.apache.hc.core5.http.EntityDetails;
-import org.apache.hc.core5.http.HttpException;
-import org.apache.hc.core5.http.HttpResponse;
+    final String hostname;
+    final String uriPattern;
+    final T handler;
 
-/**
- * Abstract asynchronous client side message exchange handler that acts as a request producer
- * and a response consumer.
- *
- * @since 5.0
- */
-public interface AsyncClientExchangeHandler extends AsyncDataExchangeHandler {
-
-    void produceRequest(RequestChannel channel) throws HttpException, IOException;
-
-    void consumeResponse(HttpResponse response, EntityDetails entityDetails) throws HttpException, IOException;
-
-    void consumeInformation(HttpResponse response) throws HttpException, IOException;
-
-    void cancel();
+    public HandlerEntry(final String hostname, final String uriPattern, final T handler) {
+        this.hostname = hostname;
+        this.uriPattern = uriPattern;
+        this.handler = handler;
+    }
 
 }
