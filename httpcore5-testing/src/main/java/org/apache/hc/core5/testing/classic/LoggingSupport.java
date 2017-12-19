@@ -24,45 +24,21 @@
  * <http://www.apache.org/>.
  *
  */
-package org.apache.hc.core5.http;
+package org.apache.hc.core5.testing.classic;
 
-import org.apache.hc.core5.annotation.Contract;
-import org.apache.hc.core5.annotation.ThreadingBehavior;
+import org.apache.hc.core5.util.Identifiable;
 
-/**
- * @since 4.4
- */
-@Contract(threading = ThreadingBehavior.STATELESS)
-public interface ExceptionListener {
+public final class LoggingSupport {
 
-    ExceptionListener NO_OP = new ExceptionListener() {
-
-        @Override
-        public void onError(final Exception ex) {
+    public static String getId(final Object object) {
+        if (object == null) {
+            return null;
         }
-
-        @Override
-        public void onError(final HttpConnection connection, final Exception ex) {
+        if (object instanceof Identifiable) {
+            return ((Identifiable) object).getId();
+        } else {
+            return object.getClass().getSimpleName() + "-" + Integer.toHexString(System.identityHashCode(object));
         }
-
-    };
-
-    ExceptionListener STD_ERR = new ExceptionListener() {
-
-        @Override
-        public void onError(final Exception ex) {
-            ex.printStackTrace();
-        }
-
-        @Override
-        public void onError(final HttpConnection connection, final Exception ex) {
-            ex.printStackTrace();
-        }
-
-    };
-
-    void onError(Exception ex);
-
-    void onError(HttpConnection connection, Exception ex);
+    }
 
 }
