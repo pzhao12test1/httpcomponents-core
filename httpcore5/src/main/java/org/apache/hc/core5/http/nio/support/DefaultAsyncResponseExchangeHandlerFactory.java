@@ -26,41 +26,39 @@
  */
 package org.apache.hc.core5.http.nio.support;
 
-import java.io.IOException;
-
+import org.apache.hc.core5.function.Supplier;
 import org.apache.hc.core5.http.HttpException;
 import org.apache.hc.core5.http.HttpRequest;
-import org.apache.hc.core5.http.nio.AsyncRequestConsumer;
-import org.apache.hc.core5.http.nio.AsyncServerRequestHandler;
-import org.apache.hc.core5.http.nio.AsyncServerResponseTrigger;
+import org.apache.hc.core5.http.HttpRequestMapper;
+import org.apache.hc.core5.http.HttpStatus;
+import org.apache.hc.core5.http.MisdirectedRequestException;
+import org.apache.hc.core5.http.nio.AsyncServerExchangeHandler;
+import org.apache.hc.core5.http.nio.HandlerFactory;
 import org.apache.hc.core5.http.protocol.HttpContext;
 import org.apache.hc.core5.util.Args;
 
 /**
  * @since 5.0
  */
-public class BasicServerExchangeHandler<T> extends AbstractServerExchangeHandler<T> {
+public final class DefaultAsyncResponseExchangeHandlerFactory implements HandlerFactory<AsyncServerExchangeHandler> {
 
-    private final AsyncServerRequestHandler<T> requestHandler;
+    private final HttpRequestMapper<Supplier<AsyncServerExchangeHandler>> mapper;
 
-    public BasicServerExchangeHandler(final AsyncServerRequestHandler<T> requestHandler) {
-        super();
-        this.requestHandler = Args.notNull(requestHandler, "Response handler");
+    public DefaultAsyncResponseExchangeHandlerFactory(final HttpRequestMapper<Supplier<AsyncServerExchangeHandler>> mapper) {
+        this.mapper = Args.notNull(mapper, "Request handler mapper");
     }
 
     @Override
-    protected AsyncRequestConsumer<T> supplyConsumer(
-            final HttpRequest request,
-            final HttpContext context) throws HttpException {
-        return requestHandler.prepare(request, context);
+    public AsyncServerExchangeHandler create(final HttpRequest request, final HttpContext context) throws HttpException {
+        try {
+            final Supplier<AsyncServerExchangeHandler> supplier = mapper.resolve(request, context);
+            if (supplier != null) {
+                return supplier.get();
+            } else {
+                return new ImmediateResponseExchangeHandler(HttpStatus.SC_NOT_FOUND, "Resource not found");
+            }
+        } catch (final MisdirectedRequestException ex) {
+            return new ImmediateResponseExchangeHandler(HttpStatus.SC_MISDIRECTED_REQUEST, "Not authoritative");
+        }
     }
-
-    @Override
-    protected void handle(
-            final T requestMessage,
-            final AsyncServerResponseTrigger responseTrigger,
-            final HttpContext context) throws HttpException, IOException {
-        requestHandler.handle(requestMessage, responseTrigger, context);
-    }
-
 }

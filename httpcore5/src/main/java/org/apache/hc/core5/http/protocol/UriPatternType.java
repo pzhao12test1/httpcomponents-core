@@ -24,28 +24,26 @@
  * <http://www.apache.org/>.
  *
  */
-package org.apache.hc.core5.http.nio;
 
-import java.io.IOException;
-
-import org.apache.hc.core5.http.EntityDetails;
-import org.apache.hc.core5.http.HttpException;
-import org.apache.hc.core5.http.HttpResponse;
+package org.apache.hc.core5.http.protocol;
 
 /**
- * Abstract asynchronous client side message exchange handler that acts as a request producer
- * and a response consumer.
- *
  * @since 5.0
  */
-public interface AsyncClientExchangeHandler extends AsyncDataExchangeHandler {
+public enum UriPatternType {
 
-    void produceRequest(RequestChannel channel) throws HttpException, IOException;
+    BASIC, REGEX;
 
-    void consumeResponse(HttpResponse response, EntityDetails entityDetails) throws HttpException, IOException;
-
-    void consumeInformation(HttpResponse response) throws HttpException, IOException;
-
-    void cancel();
+    public static <T> LookupRegistry<T> newMatcher(final UriPatternType type) {
+        if (type == null) {
+            return new UriPatternMatcher<>();
+        }
+        switch (type) {
+            case REGEX:
+                return new UriRegexMatcher<>();
+            default:
+                return new UriPatternMatcher<>();
+        }
+    }
 
 }

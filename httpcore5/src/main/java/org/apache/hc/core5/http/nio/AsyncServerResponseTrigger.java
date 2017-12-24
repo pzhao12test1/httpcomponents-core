@@ -28,24 +28,22 @@ package org.apache.hc.core5.http.nio;
 
 import java.io.IOException;
 
-import org.apache.hc.core5.http.EntityDetails;
+import org.apache.hc.core5.annotation.Contract;
+import org.apache.hc.core5.annotation.ThreadingBehavior;
 import org.apache.hc.core5.http.HttpException;
+import org.apache.hc.core5.http.HttpRequest;
 import org.apache.hc.core5.http.HttpResponse;
 
 /**
- * Abstract asynchronous client side message exchange handler that acts as a request producer
- * and a response consumer.
- *
  * @since 5.0
  */
-public interface AsyncClientExchangeHandler extends AsyncDataExchangeHandler {
+@Contract(threading = ThreadingBehavior.SAFE)
+public interface AsyncServerResponseTrigger {
 
-    void produceRequest(RequestChannel channel) throws HttpException, IOException;
+    void sendInformation(HttpResponse response) throws HttpException, IOException;
 
-    void consumeResponse(HttpResponse response, EntityDetails entityDetails) throws HttpException, IOException;
+    void submitResponse(AsyncResponseProducer responseProducer) throws HttpException, IOException;
 
-    void consumeInformation(HttpResponse response) throws HttpException, IOException;
-
-    void cancel();
+    void pushPromise(HttpRequest promise, AsyncPushProducer responseProducer) throws HttpException, IOException;
 
 }
