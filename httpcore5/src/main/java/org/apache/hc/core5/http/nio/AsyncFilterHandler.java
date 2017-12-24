@@ -24,39 +24,28 @@
  * <http://www.apache.org/>.
  *
  */
+package org.apache.hc.core5.http.nio;
 
-package org.apache.hc.core5.testing.classic;
+import java.io.IOException;
 
-import org.apache.hc.core5.http.HttpConnection;
+import org.apache.hc.core5.annotation.Contract;
+import org.apache.hc.core5.annotation.ThreadingBehavior;
+import org.apache.hc.core5.http.EntityDetails;
+import org.apache.hc.core5.http.HttpException;
 import org.apache.hc.core5.http.HttpRequest;
-import org.apache.hc.core5.http.HttpResponse;
-import org.apache.hc.core5.http.impl.Http1StreamListener;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.apache.hc.core5.http.protocol.HttpContext;
 
-public class LoggingHttp1StreamListener implements Http1StreamListener {
+/**
+ * @since 5.0
+ */
+@Contract(threading = ThreadingBehavior.STATELESS)
+public interface AsyncFilterHandler {
 
-    public static final LoggingHttp1StreamListener INSTANCE = new LoggingHttp1StreamListener();
-
-    private final Logger connLog = LogManager.getLogger("org.apache.hc.core5.http.connection");
-
-    @Override
-    public void onRequestHead(final HttpConnection connection, final HttpRequest request) {
-    }
-
-    @Override
-    public void onResponseHead(final HttpConnection connection, final HttpResponse response) {
-    }
-
-    @Override
-    public void onExchangeComplete(final HttpConnection connection, final boolean keepAlive) {
-        if (connLog.isDebugEnabled()) {
-            if (keepAlive) {
-                connLog.debug(LoggingSupport.getId(connection) + " Connection is kept alive");
-            } else {
-                connLog.debug(LoggingSupport.getId(connection) + " Connection is not kept alive");
-            }
-        }
-    }
+    AsyncDataConsumer handle(
+            HttpRequest request,
+            EntityDetails entityDetails,
+            HttpContext context,
+            AsyncFilterChain.ResponseTrigger responseTrigger,
+            AsyncFilterChain chain) throws HttpException, IOException;
 
 }
