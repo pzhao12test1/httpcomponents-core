@@ -27,18 +27,20 @@
 package org.apache.hc.core5.pool;
 
 /**
+ * Enumeration of pool concurrency policies
+ *
  * @since 5.0
  */
-public enum ConnPoolPolicy{
+public enum PoolConcurrencyPolicy {
 
     /**
-     * Re-use as few connections as possible making it possible for connections to become idle and expire.
+     * Higher concurrency but with lax connection max limit guarantees.
      */
-    LIFO,
+    LAX,
 
     /**
-     * Re-use all connections equally preventing them from becoming idle and expiring.
+     * Strict connection max limit guarantees.
      */
-    FIFO
+    STRICT
 
 }
