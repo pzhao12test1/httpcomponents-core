@@ -28,10 +28,10 @@ package org.apache.hc.core5.http.nio;
 
 import java.io.IOException;
 
-import org.apache.hc.core5.http.ContentType;
-import org.apache.hc.core5.http.HttpException;
+import org.apache.hc.core5.http.EntityDetails;
 import org.apache.hc.core5.http.HttpResponse;
 import org.apache.hc.core5.http.HttpStatus;
+import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.message.BasicHttpResponse;
 import org.apache.hc.core5.http.nio.entity.BasicAsyncEntityProducer;
 import org.apache.hc.core5.util.Args;
@@ -79,8 +79,13 @@ public class BasicResponseProducer implements AsyncResponseProducer {
     }
 
     @Override
-    public void sendResponse(final ResponseChannel responseChannel) throws HttpException, IOException {
-        responseChannel.sendResponse(response, dataProducer);
+    public HttpResponse produceResponse() {
+        return response;
+    }
+
+    @Override
+    public EntityDetails getEntityDetails() {
+        return dataProducer;
     }
 
     @Override

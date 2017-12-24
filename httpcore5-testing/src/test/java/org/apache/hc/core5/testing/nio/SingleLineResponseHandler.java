@@ -33,25 +33,29 @@ import org.apache.hc.core5.http.HttpRequest;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.Message;
 import org.apache.hc.core5.http.nio.AsyncRequestConsumer;
-import org.apache.hc.core5.http.nio.AsyncServerRequestHandler;
 import org.apache.hc.core5.http.nio.BasicRequestConsumer;
 import org.apache.hc.core5.http.nio.BasicResponseProducer;
 import org.apache.hc.core5.http.nio.entity.BasicAsyncEntityProducer;
 import org.apache.hc.core5.http.nio.entity.StringAsyncEntityConsumer;
 import org.apache.hc.core5.http.nio.support.BasicServerExchangeHandler;
+import org.apache.hc.core5.http.nio.support.RequestConsumerSupplier;
+import org.apache.hc.core5.http.nio.support.ResponseHandler;
+import org.apache.hc.core5.http.nio.support.ResponseTrigger;
 import org.apache.hc.core5.http.protocol.HttpContext;
 
 public class SingleLineResponseHandler extends BasicServerExchangeHandler<Message<HttpRequest, String>> {
 
     public SingleLineResponseHandler(final String message) {
-        super(new AsyncServerRequestHandler<Message<HttpRequest, String>>() {
+        super(new RequestConsumerSupplier<Message<HttpRequest, String>>() {
 
                   @Override
-                  public AsyncRequestConsumer<Message<HttpRequest, String>> prepare(
+                  public AsyncRequestConsumer<Message<HttpRequest, String>> get(
                           final HttpRequest request,
                           final HttpContext context) throws HttpException {
                       return new BasicRequestConsumer<>(new StringAsyncEntityConsumer());
                   }
+
+              }, new ResponseHandler<Message<HttpRequest, String>>() {
 
                   @Override
                   public void handle(

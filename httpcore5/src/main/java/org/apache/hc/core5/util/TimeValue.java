@@ -183,7 +183,7 @@ public class TimeValue {
             throw new IllegalArgumentException(
                     String.format("Expected format for <Integer><SPACE><TimeUnit>: ", value));
         }
-        return TimeValue.of(NumberFormat.getInstance(Locale.ROOT).parse(split[0]).longValue(),
+        return TimeValue.of(NumberFormat.getInstance().parse(split[0]).longValue(),
                 TimeUnit.valueOf(split[1].trim().toUpperCase(Locale.ROOT)));
     }
 
@@ -199,8 +199,9 @@ public class TimeValue {
         if (TimeValue.isPositive(timeValue)) {
             final long deadline = currentTimeMillis + timeValue.toMillis();
             return deadline >= 0 ? deadline : Long.MAX_VALUE;
+        } else {
+            return Long.MAX_VALUE;
         }
-        return Long.MAX_VALUE;
     }
 
     private final long duration;
@@ -295,7 +296,7 @@ public class TimeValue {
 
     @Override
     public String toString() {
-        return String.format(Locale.ROOT, "%,d %s", duration, timeUnit);
+        return String.format("%,d %s", duration, timeUnit);
     }
 
     public Timeout toTimeout() {

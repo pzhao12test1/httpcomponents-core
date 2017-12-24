@@ -45,7 +45,7 @@ import org.apache.hc.core5.http.nio.BasicResponseConsumer;
 import org.apache.hc.core5.http.nio.entity.StringAsyncEntityConsumer;
 import org.apache.hc.core5.io.ShutdownType;
 import org.apache.hc.core5.reactor.IOReactorConfig;
-import org.apache.hc.core5.util.Timeout;
+import org.apache.hc.core5.util.TimeValue;
 
 /**
  * Example of asynchronous HTTP/1.1 request execution.
@@ -103,7 +103,7 @@ public class AsyncRequestExecutionExample {
             requester.execute(
                     new BasicRequestProducer("GET", target, requestUri),
                     new BasicResponseConsumer<>(new StringAsyncEntityConsumer()),
-                    Timeout.ofSeconds(5),
+                    TimeValue.ofSeconds(5),
                     new FutureCallback<Message<HttpResponse, String>>() {
 
                         @Override

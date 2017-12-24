@@ -45,6 +45,7 @@ import org.apache.hc.core5.http.NotImplementedException;
 import org.apache.hc.core5.http.ProtocolException;
 import org.apache.hc.core5.http.ProtocolVersion;
 import org.apache.hc.core5.http.UnsupportedHttpVersionException;
+import org.apache.hc.core5.http.impl.LazyEntityDetails;
 import org.apache.hc.core5.http.nio.AsyncPushProducer;
 import org.apache.hc.core5.http.nio.AsyncResponseProducer;
 import org.apache.hc.core5.http.nio.AsyncServerExchangeHandler;
@@ -52,6 +53,7 @@ import org.apache.hc.core5.http.nio.BasicResponseProducer;
 import org.apache.hc.core5.http.nio.CapacityChannel;
 import org.apache.hc.core5.http.nio.DataStreamChannel;
 import org.apache.hc.core5.http.nio.HandlerFactory;
+import org.apache.hc.core5.http.nio.HttpContextAware;
 import org.apache.hc.core5.http.nio.ResourceHolder;
 import org.apache.hc.core5.http.nio.ResponseChannel;
 import org.apache.hc.core5.http.nio.support.ImmediateResponseExchangeHandler;
@@ -227,16 +229,16 @@ class ServerHttp1StreamHandler implements ResourceHolder {
         return code;
     }
 
-    void consumeHeader(final HttpRequest request, final EntityDetails requestEntityDetails) throws HttpException, IOException {
+    void consumeHeader(final HttpRequest request, final boolean requestEndStream) throws HttpException, IOException {
         if (done.get() || requestState != MessageState.HEADERS) {
             throw new ProtocolException("Unexpected message head");
         }
         receivedRequest = request;
-        requestState = requestEntityDetails == null ? MessageState.COMPLETE : MessageState.BODY;
+        requestState = requestEndStream ? MessageState.COMPLETE : MessageState.BODY;
 
         AsyncServerExchangeHandler handler;
         try {
-            handler = exchangeHandlerFactory.create(request, context);
+            handler = exchangeHandlerFactory.create(request);
         } catch (final MisdirectedRequestException ex) {
             handler =  new ImmediateResponseExchangeHandler(HttpStatus.SC_MISDIRECTED_REQUEST, ex.getMessage());
         } catch (final HttpException ex) {
@@ -255,6 +257,11 @@ class ServerHttp1StreamHandler implements ResourceHolder {
         context.setProtocolVersion(transportVersion);
         context.setAttribute(HttpCoreContext.HTTP_REQUEST, request);
 
+        if (exchangeHandler instanceof HttpContextAware) {
+            ((HttpContextAware) exchangeHandler).setContext(context);
+        }
+
+        final EntityDetails requestEntityDetails = requestEndStream ? null : new LazyEntityDetails(request);
         final ResponseChannel responseChannel = new ResponseChannel() {
 
             @Override
@@ -278,12 +285,12 @@ class ServerHttp1StreamHandler implements ResourceHolder {
         };
         try {
             httpProcessor.process(request, requestEntityDetails, context);
-            exchangeHandler.handleRequest(request, requestEntityDetails, responseChannel, context);
+            exchangeHandler.handleRequest(request, requestEntityDetails, responseChannel);
         } catch (final HttpException ex) {
             if (!responseCommitted.get()) {
                 final AsyncResponseProducer responseProducer = handleException(ex);
                 exchangeHandler = new ImmediateResponseExchangeHandler(responseProducer);
-                exchangeHandler.handleRequest(request, requestEntityDetails, responseChannel, context);
+                exchangeHandler.handleRequest(request, requestEntityDetails, responseChannel);
             } else {
                 throw ex;
             }

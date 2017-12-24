@@ -35,6 +35,7 @@ import org.apache.hc.core5.concurrent.FutureCallback;
 import org.apache.hc.core5.http.EntityDetails;
 import org.apache.hc.core5.http.Header;
 import org.apache.hc.core5.http.HttpException;
+import org.apache.hc.core5.http.HttpRequest;
 import org.apache.hc.core5.http.HttpResponse;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.nio.AsyncClientExchangeHandler;
@@ -67,7 +68,9 @@ public class BasicClientExchangeHandler<T> implements AsyncClientExchangeHandler
 
     @Override
     public void produceRequest(final RequestChannel requestChannel) throws HttpException, IOException {
-        requestProducer.sendRequest(requestChannel);
+        final HttpRequest request = requestProducer.produceRequest();
+        final EntityDetails entityDetails = requestProducer.getEntityDetails();
+        requestChannel.sendRequest(request, entityDetails);
     }
 
     @Override
