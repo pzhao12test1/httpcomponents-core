@@ -24,45 +24,40 @@
  * <http://www.apache.org/>.
  *
  */
-package org.apache.hc.core5.http;
 
-import org.apache.hc.core5.annotation.Contract;
-import org.apache.hc.core5.annotation.ThreadingBehavior;
+package org.apache.hc.core5.testing.classic;
 
-/**
- * @since 4.4
- */
-@Contract(threading = ThreadingBehavior.STATELESS)
-public interface ExceptionListener {
+import java.net.SocketException;
 
-    ExceptionListener NO_OP = new ExceptionListener() {
+import org.apache.hc.core5.http.ConnectionClosedException;
+import org.apache.hc.core5.http.ExceptionListener;
+import org.apache.hc.core5.http.HttpConnection;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
-        @Override
-        public void onError(final Exception ex) {
+public class LoggingExceptionListener implements ExceptionListener {
+
+    public final static LoggingExceptionListener INSTANCE = new LoggingExceptionListener();
+
+    private final Logger connLog = LogManager.getLogger("org.apache.hc.core5.http.connection");
+
+    @Override
+    public void onError(final Exception ex) {
+        if (ex instanceof SocketException) {
+            connLog.debug(ex.getMessage());
+        } else {
+            connLog.error(ex.getMessage(), ex);
         }
+    }
 
-        @Override
-        public void onError(final HttpConnection connection, final Exception ex) {
+    @Override
+    public void onError(final HttpConnection conn, final Exception ex) {
+        if (ex instanceof ConnectionClosedException) {
+            connLog.debug(ex.getMessage());
+        } else if (ex instanceof SocketException) {
+            connLog.debug(ex.getMessage());
+        } else {
+            connLog.error(ex.getMessage(), ex);
         }
-
-    };
-
-    ExceptionListener STD_ERR = new ExceptionListener() {
-
-        @Override
-        public void onError(final Exception ex) {
-            ex.printStackTrace();
-        }
-
-        @Override
-        public void onError(final HttpConnection connection, final Exception ex) {
-            ex.printStackTrace();
-        }
-
-    };
-
-    void onError(Exception ex);
-
-    void onError(HttpConnection connection, Exception ex);
-
+    }
 }
